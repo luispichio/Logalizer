@@ -2,6 +2,8 @@
 
 Logalizer es una aplicación de escritorio de alto rendimiento diseñada específicamente para el análisis y búsqueda eficiente de archivos de logs en formato "JSON Lines" (JSONL). Construida con **C++17**, **Qt6** y apuntalada por bases de datos in-memory **SQLite + FTS5** (Full-Text Search), Logalizer está pensada para manejar grandes volúmenes de datos sin comprometer la fluidez de la interfaz de usuario.
 
+La idea es crear una alternativa "mas simple de usar por el público general" a la aplicación de terminal [The Logfile Navigator](https://lnav.org/), intentando mantener un balance entra las funcionalidades (las justas) y la simplicidad de uso.
+
 ## 🚀 Características Principales
 
 - **Auto-Detección Inteligente de Esquemas**: Escanea las primeras líneas (hasta 10.000) de cada archivo de log para entender su estructura. Los campos JSON presentes en al menos el 80% de las líneas se convierten automáticamente en columnas indexadas, adaptándose a estructuras heterogéneas.
@@ -32,6 +34,10 @@ En la siguiente tabla se detallan las tareas pendientes, optimizaciones y futura
 | ⏳ | **Guardar/Cargar Workspaces** | Capacidad de guardar las sesiones de vista, archivos que están abiertos y sus filtros activos para recuperar el entorno más tarde. |
 | ⏳ | **Gráficos de Frecuencia** | Mini-histograma o gráfico de líneas en la UI marcando el volumen de logs en función del tiempo transcurrido o campos tipo `Date/Timestamp`. |
 | ⏳ | **Parser Genérico de Texto** | Ampliar la ingesta más allá del JSON Lines soportando configuraciones mediante expresiones regulares (Grok-like) para logs raw comunes. |
+| ⏳ | **Cliente SFTP** | Implementar cliente SFTP para conectarse a servidores remotos y descargar logs. |
+| ⏳ | **Apertura de múltiples archivos (misma tabla)** | El diálogo de apertura de archivos debería permitir la selección múltiple de archivos para abrirlos en la misma tabla. |
+| ⏳ | **Apertura de archivos comprimidos (.zip, .gz)** | Soporte apertura de archivos comprimidos (logrotate) |
+
 
 ## 🚀 Instalación y Compilación
 
