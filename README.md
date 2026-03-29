@@ -8,11 +8,11 @@ La idea es crear una alternativa "mas simple de usar por el público general" a 
 
 - **Auto-Detección Inteligente de Esquemas**: Escanea las primeras líneas (hasta 10.000) de cada archivo de log para entender su estructura. Los campos JSON presentes en al menos el 80% de las líneas se convierten automáticamente en columnas indexadas, adaptándose a estructuras heterogéneas.
 - **Búsqueda Ultrarrápida**: Utiliza tablas virtuales de SQLite (FTS5) en memoria RAM (`:memory:`) para ofrecer respuestas casi instantáneas, incluso en búsquedas complejas full-text.
-- **Multihilo & Asincronismo**: La lectura e inserción de logs ocurre en hilos de background (chunks/transactions), permitiendo una **visualización parcial instantánea** de los datos en la interfaz sin esperar a que cargue todo el archivo.
+- **Multihilo & Asincronismo**: La lectura e inserción de logs ocurre en hilos de background (chunks de 5.000 líneas). Un debounce de 1.5 segundos garantiza que la UI permanezca fluida durante la carga, actualizando la vista a intervalos razonables.
 - **Gestión Eficiente de Memoria**: Aislamiento total de recursos. Cada log abierto vive en su propia tabla temporal. Al cerrar la pestaña del archivo, la tabla se descarta inmediatamente (`DROP TABLE`), liberando la memoria RAM sin afectar a otros archivos.
 - **Búsqueda Cruzada (Aggregate Search)**: Posibilidad de realizar consultas de búsqueda transparentes, ejecutando un `UNION ALL` en background sobre múltiples archivos cargados.
-- **Filtros Dinámicos de Interfaz**: Construcción automática de widgets de filtrado (texto, numérico, fechas, booleanos) basados en el esquema detectado, con soporte para operadores lógicos (AND, OR, NOT).
-- **Vista Dual**: Alterna fácilmente entre una vista jerárquica de tabla estructurada o el log puro de texto plano.
+- **Filtros Dinámicos Múltiples**: Panel de filtros de filas ilimitadas. Cada fila tiene selector de columna, operador (`contains`, `=`, `!=`, `>`, `<`) y lógica (AND/OR/NOT). Haciendo clic en una celda de la tabla se pre-rellena automáticamente un filtro.
+- **Vista Dual Inteligente**: Alterna entre tabla estructurada y texto plano. La vista de tabla incluye: ordenamiento por header, visibilidad de columnas configurable (clic derecho en header), columna `raw` oculta por defecto, selección múltiple de celdas y copia con Ctrl+C. La vista de texto es la predeterminada para archivos sin estructura JSON.
 
 ## 🛠️ Stack Tecnológico
 

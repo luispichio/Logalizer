@@ -20,19 +20,27 @@ Este archivo `Logalizer.md` sirve como la fuente de verdad para el contexto del 
             - Los campos de tipo objeto o array no se indexan (solo funciones de búsqueda de texto).
             - Cómo mínimo los campos / columnas: raw, file_position.
             - Posibilidad de buscar de manera agregada: si el usuario no filtra por archivo específico, `search_logs` procesa un UNION ALL transparente de todas las tablas activas.
-    - UI
         - Visualización de logs en formato texto o tabla.
         - Un tab por archivo de logs.
-        - Filtros por columnas (dinámicos según el formato de logs).
-            - Tipos de filtros: texto, número, fecha, booleano, ...
-            - Búsqueda por palabras clave.
-            - Opción resaltado de resultados.
-            - Opción "solo se ve" lo que cumple con los filtros aplicados.
-            - La query a la base de datos depende de los filtros aplicados.
-            - Operadores lógicos para filtros (AND, OR, NOT).
+        - Filtros dinámicos de múltiples filas por columna (panelflexible):
+            - Cada fila de filtro: `[Logic▼] [Columna▼] [Operador▼] [Valor] [×]`
+            - Operadores: `contains`, `=`, `!=`, `>`, `<`.
+            - Operadores lógicos: AND, OR, NOT entre filas.
+            - Se pueden agregar N filtros para la misma columna.
+            - Al hacer clic en una celda de la tabla se pre-rellena un filtro con columna + valor.
+            - Búsqueda por palabras clave (FTS5 MATCH).
+            - Opción "Filter only" → muestra solo las líneas que cumplen los filtros.
+        - Vista tabla:
+            - Ordenamiento ascendente/descendente haciendo clic en el header de columna.
+            - Columnas ocultables/mostrables con clic derecho en el header.
+            - La columna `raw` está oculta por defecto cuando hay columnas dinámicas.
+            - Selección múltiple de celdas (ExtendedSelection).
+            - Copiar selección al portapapeles con Ctrl+C (tab-separated, newline por fila).
+        - Vista de texto: vista por defecto cuando el archivo no tiene columnas dinámicas (no es JSONL).
         - Posibilidad de analizar múltiples archivos de logs concurrentemente.
         - Al cerrar un archivo de logs -> se deben liberar los recursos asociados utilizando `DROP TABLE`.
         - Visualización parcial instantánea: permite ver la tabla mientras los bytes restantes del archivo se ingieren asincrónicamente usando chunks/transactions cada ~5000 líneas.
+            - Debounce de 1.5 segundos: el refresh de la UI se dispara máximo cada 1.5 segundos durante la ingesta para no bloquear el hilo de UI.
         - El scroll permite (en un futuro) ir a una posición específica del archivo: Evita tener que cargar todo el archivo en memoria.
 
 ## 2. Stack Tecnológico
