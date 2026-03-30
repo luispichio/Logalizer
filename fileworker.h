@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QVector>
+#include <atomic>
 #include "linerecord.h"
 #include "schemadetector.h"
 
@@ -35,7 +36,7 @@ private:
 
     QString m_fileName;
     int m_fileId;
-    bool m_stopRequested = false;
+    std::atomic<bool> m_stopRequested{false};  // written by main thread, read by worker
 
     static constexpr int SCAN_LINES = 10000;
     static constexpr int CHUNK_SIZE = 5000;

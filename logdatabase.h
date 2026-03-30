@@ -61,6 +61,9 @@ public:
     /// Get total row count in the meta table for a file.
     int rowCount(int fileId);
 
+    /// Returns the total size of the in-memory SQLite database in bytes.
+    qint64 totalDbSizeBytes() const;
+
     /// Get list of active file IDs.
     QSet<int> activeFileIds() const;
 

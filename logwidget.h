@@ -129,8 +129,14 @@ private:
     QSpinBox*     m_offsetSpin = nullptr;   // starting row offset
     QSpinBox*     m_limitSpin  = nullptr;   // rows per page
 
-    // Scroll state
-    int m_lastTotalCount = 0;
+    // 3-state sort state (managed by sectionClicked lambda)
+    int m_sortColumn = -1;  // -1 = no active sort
+    int m_sortCycle  = 0;   // 0=none  1=asc  2=desc
+
+    // Pagination / scroll state
+    int  m_lastTotalCount = 0;
+    bool m_pageChanging   = false;  // true while refreshData populates model
+    bool m_scrollToBottom = false;  // request view to scroll to bottom after next refresh
 
     // State
     qint64  m_fileSize   = 0;

@@ -30,6 +30,24 @@
 #include <QtLogging>
 #include <algorithm>
 
+// ─── NumericAwareProxyModel ───────────────────────────────────────────────────
+// Defined here (no Q_OBJECT needed: we only override lessThan, no new signals/slots).
+class NumericAwareProxyModel : public QSortFilterProxyModel {
+public:
+    explicit NumericAwareProxyModel(QObject* parent = nullptr)
+        : QSortFilterProxyModel(parent) {}
+protected:
+    bool lessThan(const QModelIndex& left, const QModelIndex& right) const override {
+        QString ls = left.data(Qt::DisplayRole).toString();
+        QString rs = right.data(Qt::DisplayRole).toString();
+        bool lok = false, rok = false;
+        double ln = ls.toDouble(&lok);
+        double rn = rs.toDouble(&rok);
+        if (lok && rok) return ln < rn;   // numeric comparison
+        return ls < rs;                    // lexicographic fallback
+    }
+};
+
 // ─── Constructor / Destructor ─────────────────────────────────────────────────
 
 LogWidget::LogWidget(const QString& filePath, int fileId, QWidget *parent)
@@ -61,11 +79,17 @@ LogWidget::LogWidget(const QString& filePath, int fileId, QWidget *parent)
 
 LogWidget::~LogWidget() {
     m_refreshTimer->stop();
-    if (m_worker) m_worker->stop();
+    if (m_worker) m_worker->stop();          // sets atomic m_stopRequested = true
     if (m_workerThread) {
         m_workerThread->quit();
-        m_workerThread->wait(3000);
+        // Wait generously; worker checks m_stopRequested every batch (~5000 lines ≈ fast)
+        if (!m_workerThread->wait(8000)) {
+            qWarning() << "LogWidget: Worker thread did not finish, terminating.";
+            m_workerThread->terminate();
+            m_workerThread->wait(1000);
+        }
     }
+    // dropTable runs after thread is guaranteed done → no concurrent inserts
     LogDatabase::instance().dropTable(m_fileId);
     qInfo() << "LogWidget: Cleaned up fileId" << m_fileId << m_filePath;
 }
@@ -140,10 +164,14 @@ void LogWidget::setupUi() {
         m_tableView->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
 
         m_tableModel = new QStandardItemModel(this);
-        m_proxyModel = new QSortFilterProxyModel(this);
+        // NumericAwareProxyModel: sorts numbers as doubles, strings lexicographically.
+        m_proxyModel = new NumericAwareProxyModel(this);
         m_proxyModel->setSourceModel(m_tableModel);
         m_proxyModel->setSortCaseSensitivity(Qt::CaseInsensitive);
         m_tableView->setModel(m_proxyModel);
+        // Disable Qt's automatic sort-on-header-click; we manage 3-state manually.
+        m_tableView->setSortingEnabled(false);
+        m_tableView->horizontalHeader()->setSortIndicatorShown(false);
 
         // Text view (index 1)
         m_textBrowser = new QTextBrowser(this);
@@ -163,26 +191,62 @@ void LogWidget::setupUi() {
                 this, &LogWidget::onHeaderContextMenu);
         connect(m_tableView, &QTableView::clicked, this, &LogWidget::onCellClicked);
 
-        // Scroll to end → advance offset by one page
-        connect(m_tableView->verticalScrollBar(), &QScrollBar::valueChanged,
-                this, [this](int value) {
-            QScrollBar* sb = m_tableView->verticalScrollBar();
-            if (value >= sb->maximum() && sb->maximum() > 0
-                && (m_offsetSpin->value() + m_limitSpin->value()) < m_lastTotalCount) {
-                m_offsetSpin->setValue(m_offsetSpin->value() + m_limitSpin->value());
-                refreshData();
+        // ── 3-state sort: none → asc → desc → none ────────────────────
+        connect(m_tableView->horizontalHeader(), &QHeaderView::sectionClicked,
+                this, [this](int col) {
+            if (m_sortColumn == col) {
+                m_sortCycle = (m_sortCycle + 1) % 3;
+            } else {
+                m_sortColumn = col;
+                m_sortCycle  = 1;  // first click on new column → ascending
+            }
+            if (m_sortCycle == 0) {
+                // Reset: no sort, natural (insertion) order
+                m_proxyModel->sort(-1, Qt::AscendingOrder);
+                m_tableView->horizontalHeader()->setSortIndicatorShown(false);
+            } else {
+                Qt::SortOrder ord = (m_sortCycle == 1) ? Qt::AscendingOrder : Qt::DescendingOrder;
+                m_tableView->horizontalHeader()->setSortIndicatorShown(true);
+                m_tableView->horizontalHeader()->setSortIndicator(col, ord);
+                m_proxyModel->sort(col, ord);
             }
         });
 
-        // Text view scroll to end → advance offset
-        connect(m_textBrowser->verticalScrollBar(), &QScrollBar::valueChanged,
-                this, [this](int value) {
-            QScrollBar* sb = m_textBrowser->verticalScrollBar();
-            if (value >= sb->maximum() && sb->maximum() > 0
-                && (m_offsetSpin->value() + m_limitSpin->value()) < m_lastTotalCount) {
-                m_offsetSpin->setValue(m_offsetSpin->value() + m_limitSpin->value());
-                refreshData();
+        // ── Bidirectional scroll paging with 10% overlap ───────────────
+        // step = 90% of page → 10% overlap between consecutive pages
+        auto doScroll = [this](bool goDown) {
+            if (m_pageChanging || !m_offsetSpin || !m_limitSpin) return;
+            int step = qMax(1, m_limitSpin->value() * 9 / 10);
+            if (goDown) {
+                if (m_offsetSpin->value() + m_limitSpin->value() >= m_lastTotalCount) return;
+                m_offsetSpin->setValue(m_offsetSpin->value() + step);
+                m_scrollToBottom = false;
+            } else {
+                if (m_offsetSpin->value() <= 0) return;
+                m_offsetSpin->setValue(qMax(0, m_offsetSpin->value() - step));
+                m_scrollToBottom = true;  // scroll to bottom so user sees the overlap rows
             }
+            refreshData();
+        };
+
+        connect(m_tableView->verticalScrollBar(), &QScrollBar::valueChanged,
+                this, [this, doScroll](int value) {
+            if (m_pageChanging) return;
+            QScrollBar* sb = m_tableView->verticalScrollBar();
+            if (value >= sb->maximum() && sb->maximum() > 0)
+                doScroll(true);
+            else if (value <= sb->minimum() && sb->maximum() > 0)
+                doScroll(false);
+        });
+
+        connect(m_textBrowser->verticalScrollBar(), &QScrollBar::valueChanged,
+                this, [this, doScroll](int value) {
+            if (m_pageChanging) return;
+            QScrollBar* sb = m_textBrowser->verticalScrollBar();
+            if (value >= sb->maximum() && sb->maximum() > 0)
+                doScroll(true);
+            else if (value <= sb->minimum() && sb->maximum() > 0)
+                doScroll(false);
         });
 
         // Ctrl+C copy
@@ -605,6 +669,12 @@ void LogWidget::refreshData() {
 
     m_lastTotalCount = totalCount;
 
+    // Guard: block scroll-bar valueChanged signals while we repopulate the model
+    // so that mid-clear / mid-populate signals don't re-trigger page navigation.
+    m_pageChanging = true;
+    m_tableView->verticalScrollBar()->blockSignals(true);
+    m_textBrowser->verticalScrollBar()->blockSignals(true);
+
     // ── Populate table model ──────────────────────────────────────────
     m_tableModel->clear();
     m_tableModel->setHorizontalHeaderLabels(headers);
@@ -622,7 +692,7 @@ void LogWidget::refreshData() {
     // Apply saved column visibility (hides 'raw' if dynamic columns exist, etc.)
     applyColumnVisibility();
 
-    // Resize only visible columns to avoid wasted time on hidden wide columns
+    // Resize only visible columns
     for (int i = 0; i < m_tableModel->columnCount(); i++) {
         if (!m_tableView->isColumnHidden(i))
             m_tableView->resizeColumnToContents(i);
@@ -640,6 +710,20 @@ void LogWidget::refreshData() {
                 text += row[rawIndex] + "\n";
         }
         m_textBrowser->setPlainText(text);
+    }
+
+    // Re-enable signals BEFORE positioning scrollbar
+    m_tableView->verticalScrollBar()->blockSignals(false);
+    m_textBrowser->verticalScrollBar()->blockSignals(false);
+    m_pageChanging = false;
+
+    // After a "previous page" load, scroll to bottom so the overlap rows are visible
+    if (m_scrollToBottom) {
+        m_scrollToBottom = false;
+        m_tableView->verticalScrollBar()->setValue(
+            m_tableView->verticalScrollBar()->maximum());
+        m_textBrowser->verticalScrollBar()->setValue(
+            m_textBrowser->verticalScrollBar()->maximum());
     }
 
     m_labelState->setText(

@@ -144,6 +144,9 @@ bool LogDatabase::dropTable(int fileId) {
         ok = false;
     }
 
+    // Ask SQLite to release its internal page cache back to the OS
+    q.exec("PRAGMA shrink_memory");
+
     m_tableColumns.remove(fileId);
     qInfo() << "LogDatabase: Dropped tables for fileId" << fileId;
     return ok;
@@ -251,6 +254,17 @@ int LogDatabase::rowCount(int fileId) {
     if (q.exec(QString("SELECT COUNT(*) FROM %1").arg(metaTableName(fileId))) && q.next())
         return q.value(0).toInt();
     return 0;
+}
+
+qint64 LogDatabase::totalDbSizeBytes() const {
+    QMutexLocker locker(&m_mutex);
+    QSqlQuery q(m_db);
+    qint64 pageCount = 0, pageSize = 4096;
+    if (q.exec("PRAGMA page_count") && q.next())
+        pageCount = q.value(0).toLongLong();
+    if (q.exec("PRAGMA page_size") && q.next())
+        pageSize = q.value(0).toLongLong();
+    return pageCount * pageSize;
 }
 
 QSet<int> LogDatabase::activeFileIds() const {

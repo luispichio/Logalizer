@@ -1,6 +1,9 @@
 #include "mainwindow.h"
 #include "logwidget.h"
+#include "logdatabase.h"
 
+#include <QLabel>
+#include <QTimer>
 #include <QTabWidget>
 #include <QMenuBar>
 #include <QToolBar>
@@ -65,7 +68,26 @@ void MainWindow::setupUi() {
     toolBar->addAction(aboutAction);
 
     // ─── Status bar ──────────────────────────────────────────────────
+    m_labelMemory = new QLabel("DB: 0 MB", this);
+    m_labelMemory->setToolTip("SQLite in-memory database size (page_count × page_size)");
+    statusBar()->addPermanentWidget(m_labelMemory);
     statusBar()->showMessage("Ready");
+
+    // Update memory label every 2 seconds
+    m_memTimer = new QTimer(this);
+    m_memTimer->setInterval(2000);
+    connect(m_memTimer, &QTimer::timeout, this, &MainWindow::updateMemoryLabel);
+    m_memTimer->start();
+}
+
+void MainWindow::updateMemoryLabel() {
+    qint64 bytes = LogDatabase::instance().totalDbSizeBytes();
+    QString txt;
+    if (bytes < 1024 * 1024)
+        txt = QString("DB: %1 KB").arg(bytes / 1024);
+    else
+        txt = QString("DB: %1 MB").arg(bytes / 1024.0 / 1024.0, 0, 'f', 1);
+    m_labelMemory->setText(txt);
 }
 
 void MainWindow::onOpenFile() {
@@ -112,7 +134,7 @@ void MainWindow::onAbout() {
     box->setText(
         "<h2>Logalizer</h2>"
         "<p>High-performance JSON Lines log analyzer.<br>"
-        "A simple, zero-configuration alternative to <code>lnav</code>.</p>"
+        "A simple, zero-configuration desktop alternative to <code>lnav</code>.</p>"
         "<ul>"
         "<li>Hybrid SQLite schema: B-tree indexes + FTS5</li>"
         "<li>Multi-threaded background ingestion</li>"
@@ -125,7 +147,7 @@ void MainWindow::onAbout() {
         "<a href='https://github.com/luispichio/Logalizer'>"
         "github.com/luispichio/Logalizer</a></p>"
         "<p><b>Author:</b> "
-        "<a href='https://github.com/luispichio'>luispichio</a></p>"
+        "<a href='https://luispichio.github.io/'>luispichio</a></p>"
     );
     box->setStandardButtons(QMessageBox::Ok);
     box->exec();
