@@ -17,6 +17,8 @@
 #include <QPushButton>
 #include <QCheckBox>
 #include <QScrollArea>
+#include <QScrollBar>
+#include <QSpinBox>
 #include <QSortFilterProxyModel>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -161,6 +163,28 @@ void LogWidget::setupUi() {
                 this, &LogWidget::onHeaderContextMenu);
         connect(m_tableView, &QTableView::clicked, this, &LogWidget::onCellClicked);
 
+        // Scroll to end → advance offset by one page
+        connect(m_tableView->verticalScrollBar(), &QScrollBar::valueChanged,
+                this, [this](int value) {
+            QScrollBar* sb = m_tableView->verticalScrollBar();
+            if (value >= sb->maximum() && sb->maximum() > 0
+                && (m_offsetSpin->value() + m_limitSpin->value()) < m_lastTotalCount) {
+                m_offsetSpin->setValue(m_offsetSpin->value() + m_limitSpin->value());
+                refreshData();
+            }
+        });
+
+        // Text view scroll to end → advance offset
+        connect(m_textBrowser->verticalScrollBar(), &QScrollBar::valueChanged,
+                this, [this](int value) {
+            QScrollBar* sb = m_textBrowser->verticalScrollBar();
+            if (value >= sb->maximum() && sb->maximum() > 0
+                && (m_offsetSpin->value() + m_limitSpin->value()) < m_lastTotalCount) {
+                m_offsetSpin->setValue(m_offsetSpin->value() + m_limitSpin->value());
+                refreshData();
+            }
+        });
+
         // Ctrl+C copy
         auto* copyAction = new QAction("Copy", this);
         copyAction->setShortcut(QKeySequence::Copy);
@@ -216,6 +240,25 @@ void LogWidget::setupUi() {
         statusBar->addWidget(new QLabel("Lines:", this));
         m_labelLines = new QLabel("0", this);
         statusBar->addWidget(m_labelLines);
+        statusBar->addSpacing(12);
+
+        statusBar->addWidget(new QLabel("Offset:", this));
+        m_offsetSpin = new QSpinBox(this);
+        m_offsetSpin->setRange(0, 999999999);
+        m_offsetSpin->setValue(0);
+        m_offsetSpin->setMaximumWidth(90);
+        m_offsetSpin->setToolTip("Starting row offset");
+        statusBar->addWidget(m_offsetSpin);
+
+        statusBar->addWidget(new QLabel("Rows:", this));
+        m_limitSpin = new QSpinBox(this);
+        m_limitSpin->setRange(10, 100000);
+        m_limitSpin->setValue(1000);
+        m_limitSpin->setSingleStep(500);
+        m_limitSpin->setMaximumWidth(80);
+        m_limitSpin->setToolTip("Max rows to display per page");
+        statusBar->addWidget(m_limitSpin);
+
         statusBar->addStretch();
         m_labelState = new QLabel("Loading...", this);
         statusBar->addWidget(m_labelState);
@@ -225,6 +268,10 @@ void LogWidget::setupUi() {
         m_progressBar->setMaximumWidth(300);
         statusBar->addWidget(m_progressBar);
         m_mainLayout->addLayout(statusBar);
+
+        // Apply spin changes immediately on editing
+        connect(m_offsetSpin, &QSpinBox::editingFinished, this, &LogWidget::onApplyFilters);
+        connect(m_limitSpin,  &QSpinBox::editingFinished, this, &LogWidget::onApplyFilters);
     }
 }
 
@@ -314,7 +361,8 @@ void LogWidget::onError(int fileId, QString message) {
 }
 
 void LogWidget::onApplyFilters() {
-    m_currentPage = 0;
+    // Reset to first page when the user explicitly applies filters/search
+    if (m_offsetSpin) m_offsetSpin->setValue(0);
     refreshData();
 }
 
@@ -536,21 +584,26 @@ void LogWidget::applyColumnVisibility() {
 // ─── Data Refresh ─────────────────────────────────────────────────────────────
 
 void LogWidget::refreshData() {
+    if (!m_offsetSpin || !m_limitSpin) return;
+
     QVector<Filter> filters  = collectFilters();
     QString         ftsQuery = m_searchEdit->text().trimmed();
+    int offset = m_offsetSpin->value();
+    int limit  = m_limitSpin->value();
 
     QVector<QVector<QString>> rows;
     QStringList headers;
     int totalCount = 0;
 
     bool ok = LogDatabase::instance().queryRows(
-        m_fileId, m_currentPage * PAGE_SIZE, PAGE_SIZE,
-        filters, ftsQuery, rows, headers, totalCount);
+        m_fileId, offset, limit, filters, ftsQuery, rows, headers, totalCount);
 
     if (!ok) {
         qWarning() << "LogWidget::refreshData: Query failed for fileId" << m_fileId;
         return;
     }
+
+    m_lastTotalCount = totalCount;
 
     // ── Populate table model ──────────────────────────────────────────
     m_tableModel->clear();
@@ -590,5 +643,8 @@ void LogWidget::refreshData() {
     }
 
     m_labelState->setText(
-        QString("Showing %1 of %2 rows").arg(rows.size()).arg(totalCount));
+        QString("Rows %1–%2 of %3")
+            .arg(offset + 1)
+            .arg(offset + rows.size())
+            .arg(totalCount));
 }

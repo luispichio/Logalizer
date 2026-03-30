@@ -23,9 +23,8 @@ class QComboBox;
 class QGroupBox;
 class QVBoxLayout;
 class QStackedWidget;
-class QScrollArea;
-class QModelIndex;
-class QMenu;
+class QScrollBar;
+class QSpinBox;
 
 // A single row in the dynamic filter panel:
 // [Logic▼] [Column▼] [Operator▼] [Value          ] [×]
@@ -126,11 +125,17 @@ private:
     QLabel*       m_labelState = nullptr;
     QProgressBar* m_progressBar = nullptr;
 
-    // Pagination
+    // Pagination controls (in status bar)
+    QSpinBox*     m_offsetSpin = nullptr;   // starting row offset
+    QSpinBox*     m_limitSpin  = nullptr;   // rows per page
+
+    // Scroll state
+    int m_lastTotalCount = 0;
+
+    // State
     qint64  m_fileSize   = 0;
     qint32  m_totalLines = 0;
     int     m_currentPage = 0;
-    static constexpr int PAGE_SIZE = 10000;
 };
 
 #endif // LOGWIDGET_H

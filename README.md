@@ -1,51 +1,53 @@
 # Logalizer
 
-Logalizer es una aplicación de escritorio de alto rendimiento diseñada específicamente para el análisis y búsqueda eficiente de archivos de logs en formato "JSON Lines" (JSONL). Construida con **C++17**, **Qt6** y apuntalada por bases de datos in-memory **SQLite + FTS5** (Full-Text Search), Logalizer está pensada para manejar grandes volúmenes de datos sin comprometer la fluidez de la interfaz de usuario.
+Logalizer es una aplicación de escritorio de alto rendimiento diseñada específicamente para el análisis y búsqueda eficiente de archivos de logs en formato "JSON Lines" (JSONL). Construida con **C++17**, **Qt6** y apuntalada por bases de datos in-memory **SQLite + FTS5** (Full-Text Search) con esquema híbrido, Logalizer está pensada para manejar grandes volúmenes de datos sin comprometer la fluidez de la interfaz de usuario.
 
-La idea es crear una alternativa "mas simple de usar por el público general" a la aplicación de terminal [The Logfile Navigator](https://lnav.org/), intentando mantener un balance entra las funcionalidades (las justas) y la simplicidad de uso.
+La idea es crear una alternativa "más simple de usar por el público general" a la aplicación de terminal [The Logfile Navigator](https://lnav.org/), intentando mantener un balance entre las funcionalidades (las justas) y la simplicidad de uso.
 
 ## 🚀 Características Principales
 
-- **Auto-Detección Inteligente de Esquemas**: Escanea las primeras líneas (hasta 10.000) de cada archivo de log para entender su estructura. Los campos JSON presentes en al menos el 80% de las líneas se convierten automáticamente en columnas indexadas, adaptándose a estructuras heterogéneas.
-- **Búsqueda Ultrarrápida**: Utiliza tablas virtuales de SQLite (FTS5) en memoria RAM (`:memory:`) para ofrecer respuestas casi instantáneas, incluso en búsquedas complejas full-text.
-- **Multihilo & Asincronismo**: La lectura e inserción de logs ocurre en hilos de background (chunks de 5.000 líneas). Un debounce de 1.5 segundos garantiza que la UI permanezca fluida durante la carga, actualizando la vista a intervalos razonables.
-- **Gestión Eficiente de Memoria**: Aislamiento total de recursos. Cada log abierto vive en su propia tabla temporal. Al cerrar la pestaña del archivo, la tabla se descarta inmediatamente (`DROP TABLE`), liberando la memoria RAM sin afectar a otros archivos.
-- **Búsqueda Cruzada (Aggregate Search)**: Posibilidad de realizar consultas de búsqueda transparentes, ejecutando un `UNION ALL` en background sobre múltiples archivos cargados.
-- **Filtros Dinámicos Múltiples**: Panel de filtros de filas ilimitadas. Cada fila tiene selector de columna, operador (`contains`, `=`, `!=`, `>`, `<`) y lógica (AND/OR/NOT). Haciendo clic en una celda de la tabla se pre-rellena automáticamente un filtro.
-- **Vista Dual Inteligente**: Alterna entre tabla estructurada y texto plano. La vista de tabla incluye: ordenamiento por header, visibilidad de columnas configurable (clic derecho en header), columna `raw` oculta por defecto, selección múltiple de celdas y copia con Ctrl+C. La vista de texto es la predeterminada para archivos sin estructura JSON.
+- **Auto-Detección Inteligente de Esquemas**: Escanea las primeras líneas (hasta 10.000) de cada archivo de log para entender su estructura. Los campos JSON presentes en al menos el 80% de las líneas se convierten automáticamente en columnas indexadas. Los nombres de campos con caracteres especiales (`@`, `.`, `-`, espacios, etc.) se sanean automáticamente para compatibilidad con SQLite.
+- **Esquema Híbrido SQLite (meta + FTS5)**: Por cada archivo se crean dos tablas en memoria:
+  - `logs_meta_{id}`: Tabla regular con **índices B-tree** sobre columnas `Number` y `Date` → rangos numéricos y temporales ultrarrápidos.
+  - `logs_fts_{id}`: Tabla virtual **FTS5** con el texto (`raw` + columnas `String`/`Date`) → full-text search con índice invertido.
+  - Las consultas combinan ambas con `JOIN por rowid`, usando cada índice según el tipo de filtro.
+- **Búsqueda Ultrarrápida**: Filtros de texto usan `FTS5 MATCH` (índice invertido); filtros numéricos/fecha usan el índice B-tree del meta. Sin full-scans para operaciones comunes.
+- **Multihilo & Asincronismo**: La lectura e inserción de logs ocurre en hilos de background (chunks de 5.000 líneas). Un debounce de 1.5 segundos garantiza que la UI permanezca fluida durante la carga.
+- **Gestión Eficiente de Memoria**: Aislamiento total de recursos. Cada log abierto vive en sus propias tablas temporales. Al cerrar la pestaña, `DROP TABLE` libera la RAM instantáneamente.
+- **Búsqueda Cruzada (Aggregate Search)**: `UNION ALL` transparente sobre las tablas meta de todos los archivos cargados.
+- **Filtros Dinámicos Múltiples**: Panel de filas ilimitadas. Cada fila: selector de columna, operador (`contains`, `=`, `!=`, `>`, `<`) y lógica (AND/OR/NOT). Clic en celda → pre-rellena el filtro automáticamente.
+- **Vista Dual Inteligente**: Alterna entre tabla estructurada y texto plano.
+  - **Tabla**: ordenamiento por header (click), visibilidad de columnas (clic derecho en header), columna `raw` oculta por defecto, selección múltiple de celdas, Ctrl+C para copiar.
+  - **Texto**: vista predeterminada para archivos sin estructura JSON.
+- **Paginación Configurable**: Controles de `Offset` y `Rows` en la barra de estado. Al hacer scroll hasta el final → avanza automáticamente al siguiente bloque de filas.
 
 ## 🛠️ Stack Tecnológico
 
 - **Lenguaje**: C++17
 - **Framework UI**: Qt6 (Widgets)
-- **Base de Datos**: SQLite (módulo FTS5 integrado)
-- **Build System**: CMake
+- **Base de Datos**: SQLite (módulo FTS5 integrado) — esquema híbrido meta + FTS5
+- **Build System**: CMake + Ninja (vía Qt Creator)
 
 ## 📋 Roadmap y Funcionalidades Deseadas (ToDo)
 
-En la siguiente tabla se detallan las tareas pendientes, optimizaciones y futuras características planificadas para el proyecto:
-
 | Estado | Característica / Tarea | Descripción |
 |:---:|---|---|
-| ⏳ | **Resaltado de Búsqueda** | Implementar resaltado visual (highlighting) de coincidencias dentro del FTS5 en la vista de texto (`QTextBrowser`). |
-| ⏳ | **Paginación en Disco (Virtual Scroll)** | Optimizar la carga evitando mantener el string entero del archivo en RAM, basando el cursor visual directamente en el `file_position` (offset) del archivo físico. |
-| ⏳ | **Exportación de Resultados** | Permitir exportar las filas filtradas/buscadas a un nuevo archivo JSONL o CSV. |
-| ⏳ | **Tests Unitarios** | Cobertura imprescindible sobre el parseo JSON, detección heurística de fechas (ISO-8601) y reglas lógicas. |
-| ⏳ | **Guardar/Cargar Workspaces** | Capacidad de guardar las sesiones de vista, archivos que están abiertos y sus filtros activos para recuperar el entorno más tarde. |
-| ⏳ | **Gráficos de Frecuencia** | Mini-histograma o gráfico de líneas en la UI marcando el volumen de logs en función del tiempo transcurrido o campos tipo `Date/Timestamp`. |
-| ⏳ | **Parser Genérico de Texto** | Ampliar la ingesta más allá del JSON Lines soportando configuraciones mediante expresiones regulares (Grok-like) para logs raw comunes. |
-| ⏳ | **Cliente SFTP** | Implementar cliente SFTP para conectarse a servidores remotos y descargar logs. |
-| ⏳ | **Apertura de múltiples archivos (misma tabla)** | El diálogo de apertura de archivos debería permitir la selección múltiple de archivos para abrirlos en la misma tabla. |
-| ⏳ | **Apertura de archivos comprimidos (.zip, .gz)** | Soporte apertura de archivos comprimidos (logrotate) |
-
+| ⏳ | **Resaltado de Búsqueda** | Implementar resaltado visual de coincidencias FTS5 en `QTextBrowser` (snippets). |
+| ⏳ | **Exportación de Resultados** | Exportar las filas filtradas/buscadas a un nuevo archivo JSONL o CSV. |
+| ⏳ | **Tests Unitarios** | Cobertura sobre `SchemaDetector` (parseo JSON, heurística ISO-8601) y `LogDatabase` (híbrido). Usar `QtTest`. |
+| ⏳ | **Guardar/Cargar Workspaces** | Guardar sesiones: archivos abiertos, filtros activos, visibilidad de columnas. |
+| ⏳ | **Gráficos de Frecuencia** | Mini-histograma de volumen de logs en función del tiempo (campos `Date`). |
+| ⏳ | **Parser Genérico de Texto** | Soporte para logs no-JSON mediante expresiones regulares (Grok-like). |
+| ⏳ | **Cliente SFTP** | Conectarse a servidores remotos y descargar logs directamente. |
+| ⏳ | **Apertura múltiple (misma tabla)** | Seleccionar múltiples archivos para abrirlos en la misma tabla (merge de schemas). |
+| ⏳ | **Archivos comprimidos (.zip, .gz)** | Soporte para apertura de archivos comprimidos (logrotate). |
+| ⏳ | **Ordenamiento DB-side** | `ORDER BY` en SQL al hacer clic en el header (complementa el sort en memoria actual). |
 
 ## 🚀 Instalación y Compilación
 
-*(Instrucciones genéricas para la compilación manual. Requiere entorno configurado con CMake y Qt6)*
-
 ```bash
 # Clonar el repositorio
-git clone https://github.com/tu-usuario/Logalizer.git
+git clone https://github.com/luispichio/Logalizer.git
 cd Logalizer
 
 # Crear directorio de build
@@ -54,11 +56,14 @@ mkdir build && cd build
 # Configurar con CMake
 cmake .. -DCMAKE_BUILD_TYPE=Release
 
-# Construir (ejemplo usando make)
+# Construir
 make -j$(nproc)
 ```
+
 *(Nota: El proyecto se soporta y testea habitualmente con **Qt Creator** utilizando Ninja como generador).*
 
 ## 🤝 Contribuir
 
-Cualquier contribución es bienvenida. Para cambios grandes, por favor abre un issue primero para discutir qué te gustaría cambiar o implementar. ¡Asegúrate de mantener y actualizar los tests de forma consecuente a los cambios!
+Cualquier contribución es bienvenida. Para cambios grandes, por favor abre un issue primero para discutir qué te gustaría cambiar o implementar.
+
+**Repositorio**: [github.com/luispichio/Logalizer](https://github.com/luispichio/Logalizer)

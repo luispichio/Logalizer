@@ -126,14 +126,15 @@ LineRecord FileWorker::parseLine(const QString& line, qint64 offset, qint32 line
     for (const auto& col : columns) {
         if (obj.contains(col.name)) {
             QJsonValue val = obj.value(col.name);
+            // Use sanitizedName as the key — matches column name in DB
             if (val.isString())
-                record.fields[col.name] = val.toString();
+                record.fields[col.sanitizedName] = val.toString();
             else if (val.isBool())
-                record.fields[col.name] = val.toBool() ? "true" : "false";
+                record.fields[col.sanitizedName] = val.toBool() ? "true" : "false";
             else if (val.isDouble())
-                record.fields[col.name] = QString::number(val.toDouble(), 'g', 15);
+                record.fields[col.sanitizedName] = QString::number(val.toDouble(), 'g', 15);
             else
-                record.fields[col.name] = "";
+                record.fields[col.sanitizedName] = "";
         }
     }
 

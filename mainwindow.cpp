@@ -105,9 +105,29 @@ void MainWindow::onCloseTab(int index) {
 }
 
 void MainWindow::onAbout() {
-    QMessageBox::about(this, "About Logalizer",
-                       "<h3>Logalizer</h3>"
-                       "<p>High-performance JSON Lines log analyzer.</p>"
-                       "<p>Built with Qt6 + SQLite FTS5.</p>"
-                       "<p>Version 0.1</p>");
+    QMessageBox* box = new QMessageBox(this);
+    box->setWindowTitle("About Logalizer");
+    box->setTextFormat(Qt::RichText);
+    box->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    box->setText(
+        "<h2>Logalizer</h2>"
+        "<p>High-performance JSON Lines log analyzer.<br>"
+        "A simple, zero-configuration alternative to <code>lnav</code>.</p>"
+        "<ul>"
+        "<li>Hybrid SQLite schema: B-tree indexes + FTS5</li>"
+        "<li>Multi-threaded background ingestion</li>"
+        "<li>Dynamic schema detection (JSONL)</li>"
+        "<li>Multi-file support with per-tab isolation</li>"
+        "</ul>"
+        "<p><b>Stack:</b> C++17 &bull; Qt6 &bull; SQLite FTS5 (in-memory)</p>"
+        "<p><b>Version:</b> 0.1</p>"
+        "<p>&#128279; "
+        "<a href='https://github.com/luispichio/Logalizer'>"
+        "github.com/luispichio/Logalizer</a></p>"
+        "<p><b>Author:</b> "
+        "<a href='https://github.com/luispichio'>luispichio</a></p>"
+    );
+    box->setStandardButtons(QMessageBox::Ok);
+    box->exec();
+    delete box;
 }

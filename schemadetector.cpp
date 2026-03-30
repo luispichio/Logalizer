@@ -79,6 +79,16 @@ QVector<ColumnDef> SchemaDetector::detect() const {
     std::sort(columns.begin(), columns.end(),
               [](const ColumnDef& a, const ColumnDef& b) { return a.name < b.name; });
 
+    // Deduplicate sanitizedNames (e.g. "@foo" and "_foo" both -> "_foo")
+    QSet<QString> usedNames;
+    for (auto& col : columns) {
+        QString base = col.sanitizedName;
+        int suffix = 2;
+        while (usedNames.contains(col.sanitizedName))
+            col.sanitizedName = base + "_" + QString::number(suffix++);
+        usedNames.insert(col.sanitizedName);
+    }
+
     return columns;
 }
 
