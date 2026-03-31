@@ -147,7 +147,7 @@ void MainWindow::onAbout() {
         "<a href='https://github.com/luispichio/Logalizer'>"
         "github.com/luispichio/Logalizer</a></p>"
         "<p><b>Author:</b> "
-        "<a href='https://luispichio.github.io/'>luispichio</a></p>"
+        "<a href='https://luispichio.github.io/'>Luis Pichio | https://luispichio.github.io/</a></p>"
     );
     box->setStandardButtons(QMessageBox::Ok);
     box->exec();

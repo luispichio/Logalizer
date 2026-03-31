@@ -19,6 +19,8 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSpinBox>
+#include <QKeyEvent>
+#include <QWheelEvent>
 #include <QSortFilterProxyModel>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -178,12 +180,10 @@ void LogWidget::setupUi() {
         m_textBrowser->setFont(QFont("Monospace", 9));
         m_textBrowser->setLineWrapMode(QTextEdit::NoWrap);
 
-        m_viewStack->addWidget(m_tableView); // 0
-        m_viewStack->addWidget(m_textBrowser); // 1
+        m_viewStack->addWidget(m_tableView);    // 0
+        m_viewStack->addWidget(m_textBrowser);  // 1
         m_viewStack->setCurrentIndex(0);
-
-        viewLayout->addWidget(m_viewStack, 1);
-        splitter->addWidget(viewContainer);
+        // Note: viewStack is added to contentBox together with m_logScrollBar below
 
         connect(m_viewToggleButton, &QPushButton::toggled, this, &LogWidget::onToggleView);
         connect(m_wrapCheck, &QCheckBox::toggled, this, &LogWidget::onWrapToggled);
@@ -191,17 +191,16 @@ void LogWidget::setupUi() {
                 this, &LogWidget::onHeaderContextMenu);
         connect(m_tableView, &QTableView::clicked, this, &LogWidget::onCellClicked);
 
-        // ── 3-state sort: none → asc → desc → none ────────────────────
+        // 3-state sort: none → asc → desc → none
         connect(m_tableView->horizontalHeader(), &QHeaderView::sectionClicked,
                 this, [this](int col) {
             if (m_sortColumn == col) {
                 m_sortCycle = (m_sortCycle + 1) % 3;
             } else {
                 m_sortColumn = col;
-                m_sortCycle  = 1;  // first click on new column → ascending
+                m_sortCycle  = 1;
             }
             if (m_sortCycle == 0) {
-                // Reset: no sort, natural (insertion) order
                 m_proxyModel->sort(-1, Qt::AscendingOrder);
                 m_tableView->horizontalHeader()->setSortIndicatorShown(false);
             } else {
@@ -212,42 +211,32 @@ void LogWidget::setupUi() {
             }
         });
 
-        // ── Bidirectional scroll paging with 10% overlap ───────────────
-        // step = 90% of page → 10% overlap between consecutive pages
-        auto doScroll = [this](bool goDown) {
-            if (m_pageChanging || !m_offsetSpin || !m_limitSpin) return;
-            int step = qMax(1, m_limitSpin->value() * 9 / 10);
-            if (goDown) {
-                if (m_offsetSpin->value() + m_limitSpin->value() >= m_lastTotalCount) return;
-                m_offsetSpin->setValue(m_offsetSpin->value() + step);
-                m_scrollToBottom = false;
-            } else {
-                if (m_offsetSpin->value() <= 0) return;
-                m_offsetSpin->setValue(qMax(0, m_offsetSpin->value() - step));
-                m_scrollToBottom = true;  // scroll to bottom so user sees the overlap rows
-            }
-            refreshData();
-        };
+        // Hide native vertical scrollbars — replaced by m_logScrollBar
+        m_tableView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        m_textBrowser->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
-        connect(m_tableView->verticalScrollBar(), &QScrollBar::valueChanged,
-                this, [this, doScroll](int value) {
-            if (m_pageChanging) return;
-            QScrollBar* sb = m_tableView->verticalScrollBar();
-            if (value >= sb->maximum() && sb->maximum() > 0)
-                doScroll(true);
-            else if (value <= sb->minimum() && sb->maximum() > 0)
-                doScroll(false);
+        // Custom independent vertical scrollbar
+        m_logScrollBar = new QScrollBar(Qt::Vertical, this);
+        m_logScrollBar->setMinimum(0);
+        m_logScrollBar->setMaximum(0);
+        m_logScrollBar->setSingleStep(1);
+        m_logScrollBar->setPageStep(DEFAULT_BUFFER);
+        m_logScrollBar->setToolTip("Navigate rows (position = first row in buffer)");
+        connect(m_logScrollBar, &QScrollBar::valueChanged, this, [this](int value) {
+            setPointer(value);
         });
 
-        connect(m_textBrowser->verticalScrollBar(), &QScrollBar::valueChanged,
-                this, [this, doScroll](int value) {
-            if (m_pageChanging) return;
-            QScrollBar* sb = m_textBrowser->verticalScrollBar();
-            if (value >= sb->maximum() && sb->maximum() > 0)
-                doScroll(true);
-            else if (value <= sb->minimum() && sb->maximum() > 0)
-                doScroll(false);
-        });
+        // Layout: [viewStack | logScrollBar]
+        auto* contentBox = new QHBoxLayout();
+        contentBox->setSpacing(2);
+        contentBox->addWidget(m_viewStack, 1);
+        contentBox->addWidget(m_logScrollBar);
+        viewLayout->addLayout(contentBox, 1);
+        splitter->addWidget(viewContainer);
+
+        // Event filter: intercept wheel/arrow keys to move the buffer pointer
+        m_tableView->installEventFilter(this);
+        m_textBrowser->installEventFilter(this);
 
         // Ctrl+C copy
         auto* copyAction = new QAction("Copy", this);
@@ -306,22 +295,18 @@ void LogWidget::setupUi() {
         statusBar->addWidget(m_labelLines);
         statusBar->addSpacing(12);
 
-        statusBar->addWidget(new QLabel("Offset:", this));
-        m_offsetSpin = new QSpinBox(this);
-        m_offsetSpin->setRange(0, 999999999);
-        m_offsetSpin->setValue(0);
-        m_offsetSpin->setMaximumWidth(90);
-        m_offsetSpin->setToolTip("Starting row offset");
-        statusBar->addWidget(m_offsetSpin);
-
-        statusBar->addWidget(new QLabel("Rows:", this));
-        m_limitSpin = new QSpinBox(this);
-        m_limitSpin->setRange(10, 100000);
-        m_limitSpin->setValue(1000);
-        m_limitSpin->setSingleStep(500);
-        m_limitSpin->setMaximumWidth(80);
-        m_limitSpin->setToolTip("Max rows to display per page");
-        statusBar->addWidget(m_limitSpin);
+        statusBar->addWidget(new QLabel("Buffer:", this));
+        m_bufferSizeSpin = new QSpinBox(this);
+        m_bufferSizeSpin->setRange(100, 50000);
+        m_bufferSizeSpin->setValue(DEFAULT_BUFFER);
+        m_bufferSizeSpin->setSingleStep(100);
+        m_bufferSizeSpin->setMaximumWidth(80);
+        m_bufferSizeSpin->setToolTip("Number of rows in the sliding buffer (N)");
+        statusBar->addWidget(m_bufferSizeSpin);
+        connect(m_bufferSizeSpin, &QSpinBox::editingFinished, this, [this]() {
+            m_logScrollBar->setPageStep(m_bufferSizeSpin->value());
+            setPointer(m_bufferPointer, true);
+        });
 
         statusBar->addStretch();
         m_labelState = new QLabel("Loading...", this);
@@ -332,10 +317,6 @@ void LogWidget::setupUi() {
         m_progressBar->setMaximumWidth(300);
         statusBar->addWidget(m_progressBar);
         m_mainLayout->addLayout(statusBar);
-
-        // Apply spin changes immediately on editing
-        connect(m_offsetSpin, &QSpinBox::editingFinished, this, &LogWidget::onApplyFilters);
-        connect(m_limitSpin,  &QSpinBox::editingFinished, this, &LogWidget::onApplyFilters);
     }
 }
 
@@ -409,9 +390,19 @@ void LogWidget::onFinished(int fileId) {
     if (fileId != m_fileId) return;
 
     m_refreshTimer->stop();  // cancel debounce, do final refresh now
-    m_labelState->setText("Ready");
     m_progressBar->setValue(100);
-    refreshData();
+
+    // Full buffer fill (totalRowCount may have grown significantly during ingestion)
+    fillBuffer();
+    if (m_logScrollBar) {
+        m_logScrollBar->blockSignals(true);
+        m_logScrollBar->setMaximum(qMax(0, m_totalRowCount - 1));
+        m_logScrollBar->blockSignals(false);
+    }
+    applyBufferToView();
+
+    m_labelState->setText(
+        QString("Ready — %1 rows").arg(m_totalRowCount));
 
     emit loadingFinished(fileId);
     qInfo() << "LogWidget: Loading finished for fileId" << fileId;
@@ -425,9 +416,7 @@ void LogWidget::onError(int fileId, QString message) {
 }
 
 void LogWidget::onApplyFilters() {
-    // Reset to first page when the user explicitly applies filters/search
-    if (m_offsetSpin) m_offsetSpin->setValue(0);
-    refreshData();
+    setPointer(0, true);  // reset to start, force full buffer fill
 }
 
 void LogWidget::onToggleView() {
@@ -438,7 +427,7 @@ void LogWidget::onToggleView() {
         m_viewStack->setCurrentIndex(0);
         m_viewToggleButton->setText("Text View");
     }
-    refreshData();
+    applyBufferToView();  // re-render current buffer in the new view
 }
 
 void LogWidget::onWrapToggled(bool checked) {
@@ -645,42 +634,115 @@ void LogWidget::applyColumnVisibility() {
     }
 }
 
-// ─── Data Refresh ─────────────────────────────────────────────────────────────
+// ─── Data Refresh (convenience wrapper) ──────────────────────────────────────
 
 void LogWidget::refreshData() {
-    if (!m_offsetSpin || !m_limitSpin) return;
+    setPointer(m_bufferPointer, /*force=*/true);
+}
 
-    QVector<Filter> filters  = collectFilters();
-    QString         ftsQuery = m_searchEdit->text().trimmed();
-    int offset = m_offsetSpin->value();
-    int limit  = m_limitSpin->value();
+// ─── Virtual Scroll Core ──────────────────────────────────────────────────────
 
-    QVector<QVector<QString>> rows;
-    QStringList headers;
-    int totalCount = 0;
+void LogWidget::setPointer(int p, bool force) {
+    int bufN = m_bufferSizeSpin ? m_bufferSizeSpin->value() : DEFAULT_BUFFER;
+    int maxP = qMax(0, m_totalRowCount - 1);
+    p = qBound(0, p, maxP);
 
-    bool ok = LogDatabase::instance().queryRows(
-        m_fileId, offset, limit, filters, ftsQuery, rows, headers, totalCount);
+    int delta = p - m_bufferPointer;
+    if (!force && delta == 0) return;
 
-    if (!ok) {
-        qWarning() << "LogWidget::refreshData: Query failed for fileId" << m_fileId;
-        return;
+    m_bufferPointer = p;
+
+    if (force || qAbs(delta) >= bufN) {
+        fillBuffer();
+    } else {
+        updateBufferDelta(delta);
     }
 
-    m_lastTotalCount = totalCount;
+    // Keep scrollbar in sync without triggering valueChanged
+    if (m_logScrollBar) {
+        m_logScrollBar->blockSignals(true);
+        m_logScrollBar->setMaximum(qMax(0, m_totalRowCount - 1));
+        m_logScrollBar->setValue(m_bufferPointer);
+        m_logScrollBar->blockSignals(false);
+    }
 
-    // Guard: block scroll-bar valueChanged signals while we repopulate the model
-    // so that mid-clear / mid-populate signals don't re-trigger page navigation.
-    m_pageChanging = true;
-    m_tableView->verticalScrollBar()->blockSignals(true);
-    m_textBrowser->verticalScrollBar()->blockSignals(true);
+    applyBufferToView();
+    updateStatusLabel();
+}
 
-    // ── Populate table model ──────────────────────────────────────────
+void LogWidget::fillBuffer() {
+    int bufN = m_bufferSizeSpin ? m_bufferSizeSpin->value() : DEFAULT_BUFFER;
+    auto filters = collectFilters();
+    QString fts  = m_searchEdit ? m_searchEdit->text().trimmed() : QString();
+    int total    = 0;
+
+    LogDatabase::instance().queryRows(
+        m_fileId, m_bufferPointer, bufN,
+        filters, fts, m_buffer, m_bufferHeaders, total);
+
+    m_totalRowCount = total;
+}
+
+void LogWidget::updateBufferDelta(int delta) {
+    // delta > 0 : moving DOWN  → drop 'delta' rows from top, fetch 'delta' at bottom
+    // delta < 0 : moving UP    → drop 'delta' rows from bottom, fetch 'delta' at top
+    int bufN     = m_bufferSizeSpin ? m_bufferSizeSpin->value() : DEFAULT_BUFFER;
+    int absDelta = qAbs(delta);
+    int oldN     = m_buffer.size();
+    auto filters = collectFilters();
+    QString fts  = m_searchEdit ? m_searchEdit->text().trimmed() : QString();
+
+    QVector<QVector<QString>> newRows;
+    QStringList headers;
+    int total = 0;
+
+    if (delta > 0) {
+        // Keep tail of old buffer; fetch new rows at the new bottom
+        int keep        = qMax(0, oldN - absDelta);
+        int fetchOffset = m_bufferPointer + keep;   // first new row absolute offset
+        int fetchCount  = bufN - keep;
+
+        if (fetchCount > 0)
+            LogDatabase::instance().queryRows(
+                m_fileId, fetchOffset, fetchCount,
+                filters, fts, newRows, headers, total);
+
+        if (absDelta < oldN)
+            m_buffer.remove(0, absDelta);  // drop from top
+        else
+            m_buffer.clear();
+
+        for (const auto& r : newRows) m_buffer.append(r);
+
+    } else {  // delta < 0
+        // Keep head of old buffer; fetch new rows at the new top
+        int keep       = qMax(0, oldN - absDelta);
+        int fetchCount = bufN - keep;
+
+        m_buffer.resize(keep);  // drop from bottom
+
+        if (fetchCount > 0)
+            LogDatabase::instance().queryRows(
+                m_fileId, m_bufferPointer, fetchCount,
+                filters, fts, newRows, headers, total);
+
+        // Prepend new rows
+        QVector<QVector<QString>> combined = newRows;
+        combined.append(m_buffer);
+        m_buffer = combined;
+    }
+
+    if (total > 0) m_totalRowCount = total;
+}
+
+void LogWidget::applyBufferToView() {
+    // ── Table model ───────────────────────────────────────────────────
     m_tableModel->clear();
-    m_tableModel->setHorizontalHeaderLabels(headers);
+    m_tableModel->setHorizontalHeaderLabels(m_bufferHeaders);
 
-    for (const auto& row : rows) {
+    for (const auto& row : m_buffer) {
         QList<QStandardItem*> items;
+        items.reserve(row.size());
         for (const auto& cell : row) {
             auto* item = new QStandardItem(cell);
             item->setEditable(false);
@@ -689,46 +751,61 @@ void LogWidget::refreshData() {
         m_tableModel->appendRow(items);
     }
 
-    // Apply saved column visibility (hides 'raw' if dynamic columns exist, etc.)
     applyColumnVisibility();
-
-    // Resize only visible columns
-    for (int i = 0; i < m_tableModel->columnCount(); i++) {
+    for (int i = 0; i < m_tableModel->columnCount(); i++)
         if (!m_tableView->isColumnHidden(i))
             m_tableView->resizeColumnToContents(i);
-    }
 
-    // ── Populate text view if active ──────────────────────────────────
+    // ── Text view ─────────────────────────────────────────────────────
     if (m_viewStack->currentIndex() == 1) {
-        int rawIndex = headers.indexOf("raw");
-        if (rawIndex < 0) rawIndex = qMin(1, headers.size() - 1);
-
+        int rawIdx = m_bufferHeaders.indexOf("raw");
+        if (rawIdx < 0) rawIdx = qMin(1, m_bufferHeaders.size() - 1);
         QString text;
-        text.reserve(rows.size() * 200);
-        for (const auto& row : rows) {
-            if (rawIndex < row.size())
-                text += row[rawIndex] + "\n";
-        }
+        text.reserve(m_buffer.size() * 200);
+        for (const auto& row : m_buffer)
+            if (rawIdx < row.size())
+                text += row[rawIdx] + "\n";
         m_textBrowser->setPlainText(text);
     }
+}
 
-    // Re-enable signals BEFORE positioning scrollbar
-    m_tableView->verticalScrollBar()->blockSignals(false);
-    m_textBrowser->verticalScrollBar()->blockSignals(false);
-    m_pageChanging = false;
-
-    // After a "previous page" load, scroll to bottom so the overlap rows are visible
-    if (m_scrollToBottom) {
-        m_scrollToBottom = false;
-        m_tableView->verticalScrollBar()->setValue(
-            m_tableView->verticalScrollBar()->maximum());
-        m_textBrowser->verticalScrollBar()->setValue(
-            m_textBrowser->verticalScrollBar()->maximum());
-    }
-
+void LogWidget::updateStatusLabel() {
+    int bufN = m_buffer.size();
     m_labelState->setText(
         QString("Rows %1–%2 of %3")
-            .arg(offset + 1)
-            .arg(offset + rows.size())
-            .arg(totalCount));
+            .arg(m_bufferPointer + 1)
+            .arg(m_bufferPointer + bufN)
+            .arg(m_totalRowCount));
+}
+
+// ─── Event Filter (wheel / arrow keys route to buffer pointer) ────────────────
+
+bool LogWidget::eventFilter(QObject* obj, QEvent* event) {
+    if (obj != m_tableView && obj != m_textBrowser)
+        return QWidget::eventFilter(obj, event);
+
+    if (event->type() == QEvent::Wheel) {
+        auto* we  = static_cast<QWheelEvent*>(event);
+        int angle = we->angleDelta().y();
+        // 1 wheel notch = 15 degrees; move ~3 rows per notch
+        int steps = -(angle / 15);
+        if (steps != 0) setPointer(m_bufferPointer + steps);
+        return true;  // consume: don't let native scroll run
+    }
+
+    if (event->type() == QEvent::KeyPress) {
+        auto* ke  = static_cast<QKeyEvent*>(event);
+        int bufN  = m_bufferSizeSpin ? m_bufferSizeSpin->value() : DEFAULT_BUFFER;
+        switch (ke->key()) {
+        case Qt::Key_Down:     setPointer(m_bufferPointer + 1);    return true;
+        case Qt::Key_Up:       setPointer(m_bufferPointer - 1);    return true;
+        case Qt::Key_PageDown: setPointer(m_bufferPointer + bufN); return true;
+        case Qt::Key_PageUp:   setPointer(m_bufferPointer - bufN); return true;
+        case Qt::Key_Home:     setPointer(0, true);                return true;
+        case Qt::Key_End:      setPointer(qMax(0, m_totalRowCount - 1), true); return true;
+        default: break;
+        }
+    }
+
+    return QWidget::eventFilter(obj, event);
 }

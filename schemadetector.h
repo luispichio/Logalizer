@@ -53,7 +53,7 @@ struct ColumnDef {
 class SchemaDetector
 {
 public:
-    explicit SchemaDetector(int scanLines = 10000, double threshold = 0.10);
+    explicit SchemaDetector(int scanLines = 10000, double threshold = 0.05);
 
     /// Feed a single raw JSON line to the detector. Returns true if still scanning.
     bool feedLine(const QString& line);
