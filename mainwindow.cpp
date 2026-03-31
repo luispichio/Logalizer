@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "logwidget.h"
 #include "logdatabase.h"
+#include "version.h"
 
 #include <QLabel>
 #include <QTimer>
@@ -142,7 +143,7 @@ void MainWindow::onAbout() {
         "<li>Multi-file support with per-tab isolation</li>"
         "</ul>"
         "<p><b>Stack:</b> C++17 &bull; Qt6 &bull; SQLite FTS5 (in-memory)</p>"
-        "<p><b>Version:</b> 0.1</p>"
+        "<p><b>Version:</b> " APP_VERSION_FULL "</p>"
         "<p>&#128279; "
         "<a href='https://github.com/luispichio/Logalizer'>"
         "github.com/luispichio/Logalizer</a></p>"

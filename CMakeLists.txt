@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(Logalizer VERSION 0.1 LANGUAGES CXX)
+project(Logalizer VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
@@ -8,6 +8,38 @@ set(CMAKE_AUTORCC ON)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# ── Git-based build number ────────────────────────────────────────────────────
+# Build number  = total commit count (increments automatically on every commit).
+# Commit hash   = short SHA for exact reproducibility.
+execute_process(
+    COMMAND git rev-list --count HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_BUILD_NUMBER
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+execute_process(
+    COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_COMMIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT GIT_BUILD_NUMBER)
+    set(GIT_BUILD_NUMBER "0")
+endif()
+if(NOT GIT_COMMIT_HASH)
+    set(GIT_COMMIT_HASH "unknown")
+endif()
+
+# Generate version.h from version.h.in into the build directory
+configure_file(
+    ${CMAKE_SOURCE_DIR}/version.h.in
+    ${CMAKE_BINARY_DIR}/generated/version.h
+    @ONLY
+)
+
 
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets LinguistTools)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets LinguistTools Sql)
@@ -49,6 +81,9 @@ endif()
 
 target_link_libraries(Logalizer PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
 target_link_libraries(Logalizer PRIVATE Qt${QT_VERSION_MAJOR}::Sql)
+
+# Make #include "version.h" resolve to the generated file
+target_include_directories(Logalizer PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
 if(${QT_VERSION} VERSION_LESS 6.1.0)
