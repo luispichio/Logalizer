@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Logalizer
+GenericName=Log Analyzer
+Comment=High-performance JSON Lines log analyzer
+Exec=Logalizer %F
+Icon=logalizer
+Terminal=false
+Categories=Utility;TextEditor;
+MimeType=application/x-ndjson;text/x-log;
+StartupWMClass=Logalizer
+Keywords=log;jsonl;ndjson;analyzer;viewer;

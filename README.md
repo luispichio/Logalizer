@@ -45,22 +45,101 @@ La idea es crear una alternativa "más simple de usar por el público general" a
 
 ## 🚀 Instalación y Compilación
 
+### Prerrequisitos
+
+```bash
+# Debian / Ubuntu
+sudo apt install cmake ninja-build qt6-base-dev libqt6sql6-sqlite
+
+# Fedora
+sudo dnf install cmake ninja-build qt6-qtbase-devel
+```
+
+### Compilar desde fuentes
+
 ```bash
 # Clonar el repositorio
 git clone https://github.com/luispichio/Logalizer.git
 cd Logalizer
 
-# Crear directorio de build
-mkdir build && cd build
+# Configurar (Release)
+cmake -B build-release -DCMAKE_BUILD_TYPE=Release -G Ninja
 
-# Configurar con CMake
-cmake .. -DCMAKE_BUILD_TYPE=Release
+# Compilar
+cmake --build build-release --parallel
 
-# Construir
-make -j$(nproc)
+# Ejecutar directamente
+./build-release/Logalizer
 ```
 
-*(Nota: El proyecto se soporta y testea habitualmente con **Qt Creator** utilizando Ninja como generador).*
+*(El proyecto se soporta y testea habitualmente con **Qt Creator** utilizando Ninja como generador).*
+
+---
+
+## 📦 Packaging
+
+El sistema de packaging está integrado en CMake vía **CPack**.  
+La versión del paquete se genera automáticamente a partir de `MAJOR.MINOR.BUILD`, donde `BUILD` se incrementa con cada commit de Git.
+
+### Prerrequisitos adicionales
+
+```bash
+# Debian / Ubuntu  (.deb)
+sudo apt install dpkg-dev
+
+# Fedora / openSUSE  (.rpm)
+sudo dnf install rpm-build
+```
+
+### Generar `.deb` (Debian / Ubuntu)
+
+```bash
+cmake -B build-release -DCMAKE_BUILD_TYPE=Release -G Ninja
+cmake --build build-release --parallel
+cd build-release
+cpack -G DEB
+```
+
+Genera: `logalizer_0.2.<build>_amd64.deb`
+
+```bash
+# Instalar
+sudo dpkg -i logalizer_0.2.*_amd64.deb
+
+# Desinstalar
+sudo dpkg -r logalizer
+```
+
+### Generar `.rpm` (Fedora / openSUSE)
+
+```bash
+cmake -B build-release -DCMAKE_BUILD_TYPE=Release -G Ninja
+cmake --build build-release --parallel
+cd build-release
+cpack -G RPM
+```
+
+Genera: `logalizer-0.2.<build>.x86_64.rpm`
+
+```bash
+# Instalar
+sudo rpm -i logalizer-0.2.*.x86_64.rpm
+
+# Desinstalar
+sudo rpm -e logalizer
+```
+
+### Generar `.tar.gz` (universal)
+
+```bash
+cd build-release
+cpack -G TGZ
+```
+
+> **Nota**: el `.deb` y `.rpm` requieren que Qt6 esté instalado en el sistema destino.  
+> Para un binario portable (Qt incluido), considerá generar un **AppImage** con `linuxdeployqt`.
+
+---
 
 ## 🤝 Contribuir
 

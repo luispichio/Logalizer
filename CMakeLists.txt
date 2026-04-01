@@ -107,3 +107,94 @@ install(TARGETS Logalizer
 if(QT_VERSION_MAJOR EQUAL 6)
     qt_finalize_executable(Logalizer)
 endif()
+
+# ── Install: desktop integration ─────────────────────────────────────────────
+install(FILES
+    ${CMAKE_SOURCE_DIR}/pkg/logalizer.desktop
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
+)
+install(FILES
+    ${CMAKE_SOURCE_DIR}/pkg/logalizer.png
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps
+)
+
+# ── CPack packaging ───────────────────────────────────────────────────────────
+# Package version = major.minor.build  (build auto-increments with every commit)
+set(CPACK_PACKAGE_NAME              "logalizer")
+set(CPACK_PACKAGE_VERSION           "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${GIT_BUILD_NUMBER}")
+set(CPACK_PACKAGE_VENDOR            "Luis Pichio")
+set(CPACK_PACKAGE_CONTACT           "luispichio@github")
+set(CPACK_PACKAGE_HOMEPAGE_URL      "https://github.com/luispichio/Logalizer")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "High-performance JSON Lines log analyzer — desktop alternative to lnav")
+set(CPACK_PACKAGE_DESCRIPTION
+    "Logalizer is a desktop application for analysing JSONL log files.\n"
+    "It uses an in-memory SQLite hybrid schema (B-tree + FTS5) for fast\n"
+    "filtering and full-text search without any configuration.")
+set(CPACK_RESOURCE_FILE_LICENSE     "${CMAKE_SOURCE_DIR}/LICENSE")
+
+# .deb (Debian / Ubuntu)
+set(CPACK_DEBIAN_PACKAGE_SECTION    "utils")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY   "optional")
+set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS
+    "libqt6core6 (>= 6.0), libqt6gui6 (>= 6.0), libqt6widgets6 (>= 6.0), libqt6sql6 (>= 6.0), libqt6sql6-sqlite (>= 6.0)")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS  ON)   # auto-detect remaining shared libs
+
+# .rpm (Fedora / openSUSE)
+set(CPACK_RPM_PACKAGE_LICENSE       "MIT")
+set(CPACK_RPM_PACKAGE_GROUP         "Applications/Productivity")
+set(CPACK_RPM_PACKAGE_REQUIRES      "qt6-qtbase >= 6.0")
+
+# Output filename pattern:  logalizer_0.2.47_amd64.deb
+set(CPACK_DEBIAN_FILE_NAME          "DEB-DEFAULT")
+set(CPACK_RPM_FILE_NAME             "RPM-DEFAULT")
+
+include(CPack)
+
+# ── Qt Creator: package targets ───────────────────────────────────────────────
+# Appear in Qt Creator → target selector (bottom-left) or Build menu.
+find_program(CPACK_EXECUTABLE cpack)
+
+if(CPACK_EXECUTABLE)
+    add_custom_target(package-deb
+        COMMAND ${CPACK_EXECUTABLE} -G DEB
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        DEPENDS Logalizer
+        COMMENT "Generating .deb package..."
+        VERBATIM
+    )
+    add_custom_target(package-rpm
+        COMMAND ${CPACK_EXECUTABLE} -G RPM
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        DEPENDS Logalizer
+        COMMENT "Generating .rpm package..."
+        VERBATIM
+    )
+    add_custom_target(package-tgz
+        COMMAND ${CPACK_EXECUTABLE} -G TGZ
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        DEPENDS Logalizer
+        COMMENT "Generating .tar.gz package..."
+        VERBATIM
+    )
+else()
+    message(WARNING "cpack not found — package-deb/rpm/tgz targets unavailable")
+endif()
+
+# ── AppImage target ───────────────────────────────────────────────────────────
+# Uses the SAME qmake that Qt Creator used to configure the project,
+# so linuxdeployqt bundles exactly Qt 6.9 (not the system Qt).
+get_target_property(QT_QMAKE_EXECUTABLE Qt${QT_VERSION_MAJOR}::qmake IMPORTED_LOCATION)
+
+add_custom_target(package-appimage
+    COMMAND bash
+        ${CMAKE_SOURCE_DIR}/scripts/make-appimage.sh
+        ${CMAKE_BINARY_DIR}
+        ${CMAKE_SOURCE_DIR}
+        ${QT_QMAKE_EXECUTABLE}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    DEPENDS Logalizer
+    COMMENT "Generating AppImage (bundles Qt ${Qt${QT_VERSION_MAJOR}_VERSION})..."
+    VERBATIM
+)
