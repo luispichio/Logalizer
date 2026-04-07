@@ -30,6 +30,8 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QtLogging>
+#include <QRegularExpression>
+#include <QShortcut>
 #include <algorithm>
 
 // ─── NumericAwareProxyModel ───────────────────────────────────────────────────
@@ -103,31 +105,34 @@ void LogWidget::setupUi() {
     m_mainLayout->setContentsMargins(4, 4, 4, 4);
     m_mainLayout->setSpacing(4);
 
-    // ── Debounce timer for chunk-driven refreshes ─────────────────────
+    // ── Debounce timer for chunk-driven refreshes ─────────────────
     m_refreshTimer = new QTimer(this);
     m_refreshTimer->setSingleShot(true);
     m_refreshTimer->setInterval(REFRESH_DEBOUNCE_MS);
     connect(m_refreshTimer, &QTimer::timeout, this, &LogWidget::refreshData);
 
-    // ── Search bar ────────────────────────────────────────────────────
+    // ── Toolbar: view-toggle + checkboxes ───────────────────────────
     {
-        auto* topBar = new QHBoxLayout();
-        topBar->addWidget(new QLabel("Search (FTS5):", this));
-        m_searchEdit = new QLineEdit(this);
-        m_searchEdit->setPlaceholderText("Full-text search...");
-        topBar->addWidget(m_searchEdit, 1);
-        m_searchButton = new QPushButton("Search", this);
-        topBar->addWidget(m_searchButton);
-        m_highlightCheck = new QCheckBox("Highlight", this);
-        topBar->addWidget(m_highlightCheck);
-        m_filterOnlyCheck = new QCheckBox("Filter only", this);
+        auto* toolBar = new QHBoxLayout();
+        // Icon-based view toggle: 🗂 (table) ⇄ 📝 (text)
+        m_viewToggleButton = new QPushButton("📝 Text View", this);
+        m_viewToggleButton->setCheckable(true);
+        m_viewToggleButton->setToolTip("Switch between table view and text view");
+        toolBar->addWidget(m_viewToggleButton);
+        m_wrapCheck = new QCheckBox("Wrap", this);
+        m_wrapCheck->setToolTip("Toggle word wrap in text view");
+        toolBar->addWidget(m_wrapCheck);
+/*        m_filterOnlyCheck = new QCheckBox("Filter only", this);
         m_filterOnlyCheck->setChecked(true);
-        topBar->addWidget(m_filterOnlyCheck);
-        m_mainLayout->addLayout(topBar);
+        m_filterOnlyCheck->setToolTip("When checked, only matching rows are shown");
+        toolBar->addWidget(m_filterOnlyCheck);*/
+        toolBar->addStretch();
+        m_mainLayout->addLayout(toolBar);
 
-        connect(m_searchButton, &QPushButton::clicked,    this, &LogWidget::onApplyFilters);
-        connect(m_searchEdit,   &QLineEdit::returnPressed, this, &LogWidget::onApplyFilters);
+        connect(m_viewToggleButton, &QPushButton::toggled, this, &LogWidget::onToggleView);
+        connect(m_wrapCheck, &QCheckBox::toggled, this, &LogWidget::onWrapToggled);
     }
+
 
     // ── Splitter: view area (left) | filter panel (right) ────────────
     auto* splitter = new QSplitter(Qt::Horizontal, this);
@@ -142,14 +147,95 @@ void LogWidget::setupUi() {
         auto* viewBar = new QHBoxLayout();
         auto* contentsLabel = new QLabel("Contents", this);
         contentsLabel->setStyleSheet("font-weight: bold;");
-        m_viewToggleButton = new QPushButton("Text View", this);
-        m_viewToggleButton->setCheckable(true);
-        m_wrapCheck = new QCheckBox("Wrap", this);
         viewBar->addWidget(contentsLabel);
-        viewBar->addStretch();
-        viewBar->addWidget(m_viewToggleButton);
-        viewBar->addWidget(m_wrapCheck);
         viewLayout->addLayout(viewBar);
+
+        // ── Text Find Bar (always visible in text view) ────────────────
+        m_textFindBar = new QWidget(this);
+        m_textFindBar->setVisible(true);  // visible by default in text view
+        {
+            auto* fl = new QHBoxLayout(m_textFindBar);
+            fl->setContentsMargins(2, 2, 2, 2);
+            fl->setSpacing(4);
+
+            fl->addWidget(new QLabel("Find:", m_textFindBar));
+
+            m_textFindCombo = new QComboBox(m_textFindBar);
+            m_textFindCombo->setEditable(true);
+            m_textFindCombo->setInsertPolicy(QComboBox::NoInsert);
+            m_textFindCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+            m_textFindCombo->lineEdit()->setPlaceholderText("Search in text... (Enter)");
+            fl->addWidget(m_textFindCombo, 1);
+
+            m_textFindFirst = new QPushButton("⏮", m_textFindBar);
+            m_textFindFirst->setMaximumWidth(28);
+            m_textFindFirst->setToolTip("First occurrence");
+            fl->addWidget(m_textFindFirst);
+
+            m_textFindPrev = new QPushButton("◀", m_textFindBar);
+            m_textFindPrev->setMaximumWidth(28);
+            m_textFindPrev->setToolTip("Previous occurrence (Shift+F3)");
+            fl->addWidget(m_textFindPrev);
+
+            m_textFindNext = new QPushButton("▶", m_textFindBar);
+            m_textFindNext->setMaximumWidth(28);
+            m_textFindNext->setToolTip("Next occurrence (F3)");
+            fl->addWidget(m_textFindNext);
+
+            m_textFindLast = new QPushButton("⏭", m_textFindBar);
+            m_textFindLast->setMaximumWidth(28);
+            m_textFindLast->setToolTip("Last occurrence");
+            fl->addWidget(m_textFindLast);
+
+            m_textFindClear = new QPushButton("✕ Clear", m_textFindBar);
+            m_textFindClear->setToolTip("Clear highlights");
+            fl->addWidget(m_textFindClear);
+
+            m_textFindRegex = new QCheckBox("Regex", m_textFindBar);
+            m_textFindRegex->setToolTip("Use regular expressions");
+            fl->addWidget(m_textFindRegex);
+
+            m_textFindCase = new QCheckBox("Aa", m_textFindBar);
+            m_textFindCase->setToolTip("Case-sensitive search");
+            fl->addWidget(m_textFindCase);
+
+            m_textFindStatus = new QLabel("", m_textFindBar);
+            m_textFindStatus->setMinimumWidth(80);
+            fl->addWidget(m_textFindStatus);
+        }
+        viewLayout->addWidget(m_textFindBar);
+
+        // ── Wire text find bar ───────────────────────────────────────────
+        connect(m_textFindCombo->lineEdit(), &QLineEdit::returnPressed,
+                this, &LogWidget::onTextFindSearch);
+        connect(m_textFindCombo, QOverload<int>::of(&QComboBox::activated),
+                this, [this](int) { onTextFindSearch(); });
+        connect(m_textFindFirst, &QPushButton::clicked, this, &LogWidget::onTextFindFirst);
+        connect(m_textFindPrev,  &QPushButton::clicked, this, &LogWidget::onTextFindPrev);
+        connect(m_textFindNext,  &QPushButton::clicked, this, &LogWidget::onTextFindNext);
+        connect(m_textFindLast,  &QPushButton::clicked, this, &LogWidget::onTextFindLast);
+        connect(m_textFindClear, &QPushButton::clicked, this, &LogWidget::onTextFindClear);
+        // Re-search when regex/case toggled
+        connect(m_textFindRegex, &QCheckBox::toggled, this, [this](bool) { onTextFindSearch(); });
+        connect(m_textFindCase,  &QCheckBox::toggled, this, [this](bool) { onTextFindSearch(); });
+
+        // Ctrl+F shortcut: toggle visibility (bar starts visible; Ctrl+F hides/shows)
+        auto* findShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_F), this);
+        connect(findShortcut, &QShortcut::activated, this, &LogWidget::onToggleTextFindBar);
+
+        // F3 / Shift+F3 shortcuts
+        auto* nextShortcut = new QShortcut(QKeySequence(Qt::Key_F3), this);
+        connect(nextShortcut, &QShortcut::activated, this, &LogWidget::onTextFindNext);
+        auto* prevShortcut = new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F3), this);
+        connect(prevShortcut, &QShortcut::activated, this, &LogWidget::onTextFindPrev);
+
+        // Escape closes the find bar
+        auto* escShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+        connect(escShortcut, &QShortcut::activated, this, [this]() {
+            if (m_textFindBar && m_textFindBar->isVisible())
+                m_textFindBar->setVisible(false);
+        });
+
 
         m_viewStack = new QStackedWidget(this);
 
@@ -182,11 +268,11 @@ void LogWidget::setupUi() {
 
         m_viewStack->addWidget(m_tableView);    // 0
         m_viewStack->addWidget(m_textBrowser);  // 1
-        m_viewStack->setCurrentIndex(0);
+        m_viewStack->setCurrentIndex(1);
         // Note: viewStack is added to contentBox together with m_logScrollBar below
 
-        connect(m_viewToggleButton, &QPushButton::toggled, this, &LogWidget::onToggleView);
-        connect(m_wrapCheck, &QCheckBox::toggled, this, &LogWidget::onWrapToggled);
+        // NOTE: m_viewToggleButton and m_wrapCheck are in the toolbar (created above).
+        // Connections for them are already made in the toolbar block.
         connect(m_tableView->horizontalHeader(), &QHeaderView::customContextMenuRequested,
                 this, &LogWidget::onHeaderContextMenu);
         connect(m_tableView, &QTableView::clicked, this, &LogWidget::onCellClicked);
@@ -253,6 +339,23 @@ void LogWidget::setupUi() {
         filterOuterLayout->setSpacing(4);
 
         filterOuterLayout->addWidget(new QLabel("<b>Column Filters</b>", this));
+
+        // ── FTS5 search row (moved from top bar) ────────────────────────
+        {
+            auto* ftsRow = new QHBoxLayout();
+            ftsRow->setSpacing(4);
+            ftsRow->addWidget(new QLabel("FTS5:", filterContainer));
+            m_searchEdit = new QLineEdit(filterContainer);
+            m_searchEdit->setPlaceholderText("Full-text search...");
+            m_searchEdit->setToolTip("Full-text search across all indexed columns (FTS5)");
+            ftsRow->addWidget(m_searchEdit, 1);
+            m_searchButton = new QPushButton("Search", filterContainer);
+            ftsRow->addWidget(m_searchButton);
+            filterOuterLayout->addLayout(ftsRow);
+
+            connect(m_searchButton, &QPushButton::clicked,    this, &LogWidget::onApplyFilters);
+            connect(m_searchEdit,   &QLineEdit::returnPressed, this, &LogWidget::onApplyFilters);
+        }
 
         // Scroll area contains the filter rows
         auto* scrollArea = new QScrollArea(this);
@@ -326,16 +429,18 @@ void LogWidget::switchToTextView() {
     m_viewStack->setCurrentIndex(1);
     m_viewToggleButton->blockSignals(true);
     m_viewToggleButton->setChecked(true);
-    m_viewToggleButton->setText("Table View");
+    m_viewToggleButton->setText("🗂 Table View");
     m_viewToggleButton->blockSignals(false);
+    if (m_textFindBar) m_textFindBar->setVisible(true);
 }
 
 void LogWidget::switchToTableView() {
     m_viewStack->setCurrentIndex(0);
     m_viewToggleButton->blockSignals(true);
     m_viewToggleButton->setChecked(false);
-    m_viewToggleButton->setText("Text View");
+    m_viewToggleButton->setText("📝 Text View");
     m_viewToggleButton->blockSignals(false);
+    if (m_textFindBar) m_textFindBar->setVisible(false);
 }
 
 // ─── Slots ───────────────────────────────────────────────────────────────────
@@ -360,6 +465,10 @@ void LogWidget::onSchemaReady(int fileId, QVector<ColumnDef> columns) {
 
     // Build filter column list and update any existing filter rows
     updateFilterColumns();
+
+    // Initial render: show whatever rows are already in the DB
+    // (ingestion may still be running; debounce timer handles further updates)
+    refreshData();
 
     qInfo() << "LogWidget: Schema ready for fileId" << fileId
             << "–" << columns.size() << "dynamic columns"
@@ -422,10 +531,16 @@ void LogWidget::onApplyFilters() {
 void LogWidget::onToggleView() {
     if (m_viewToggleButton->isChecked()) {
         m_viewStack->setCurrentIndex(1);
-        m_viewToggleButton->setText("Table View");
+        m_viewToggleButton->setText("🗂 Table View");  // in text mode → show "go to table" icon
+        // Keep find bar visible when switching to text view
+        if (m_textFindBar)
+            m_textFindBar->setVisible(true);
     } else {
         m_viewStack->setCurrentIndex(0);
-        m_viewToggleButton->setText("Text View");
+        m_viewToggleButton->setText("📝 Text View");  // in table mode → show "go to text" icon
+        // Hide find bar when in table view
+        if (m_textFindBar)
+            m_textFindBar->setVisible(false);
     }
     applyBufferToView();  // re-render current buffer in the new view
 }
@@ -668,6 +783,69 @@ void LogWidget::setPointer(int p, bool force) {
 
     applyBufferToView();
     updateStatusLabel();
+
+    // Proactive prefetch: extend buffer if near an edge
+    checkPrefetch();
+}
+
+void LogWidget::checkPrefetch() {
+    if (m_buffer.isEmpty() || m_totalRowCount == 0) return;
+    int bufN = m_bufferSizeSpin ? m_bufferSizeSpin->value() : DEFAULT_BUFFER;
+    auto filters = collectFilters();
+    QString fts  = m_searchEdit ? m_searchEdit->text().trimmed() : QString();
+
+    // ── Prefetch downward (near bottom of buffer) ───────────────────
+    int bufferEnd  = m_bufferPointer + m_buffer.size();  // absolute index after last row
+    int rowsBelow  = m_totalRowCount - bufferEnd;         // rows in DB not yet in buffer
+    if (rowsBelow > 0) {
+        // Distance from the bottom of the VISIBLE window to the bottom of the buffer
+        // (we treat the visible window as the last `bufN` rows of the buffer for simplicity)
+        int distToBottomEdge = m_buffer.size() - bufN;
+        if (distToBottomEdge < PREFETCH_MARGIN) {
+            int fetchCount = qMin(PREFETCH_MARGIN, rowsBelow);
+            QVector<QVector<QString>> newRows;
+            QStringList headers;
+            int total = 0;
+            LogDatabase::instance().queryRows(
+                m_fileId, bufferEnd, fetchCount,
+                filters, fts, newRows, headers, total);
+            if (total > 0) m_totalRowCount = total;
+            for (const auto& r : newRows) m_buffer.append(r);
+
+            // Trim from top if buffer grew too large
+            int maxBuf = bufN + 2 * PREFETCH_MARGIN;
+            if (m_buffer.size() > maxBuf) {
+                int trim = m_buffer.size() - maxBuf;
+                m_buffer.remove(0, trim);
+                m_bufferPointer += trim;
+            }
+        }
+    }
+
+    // ── Prefetch upward (near top of buffer) ─────────────────────
+    if (m_bufferPointer > 0) {
+        int distToTopEdge = m_bufferPointer;  // rows in DB above the buffer start
+        if (distToTopEdge < PREFETCH_MARGIN) {
+            int fetchCount = qMin(PREFETCH_MARGIN, m_bufferPointer);
+            int fetchStart = m_bufferPointer - fetchCount;
+            QVector<QVector<QString>> newRows;
+            QStringList headers;
+            int total = 0;
+            LogDatabase::instance().queryRows(
+                m_fileId, fetchStart, fetchCount,
+                filters, fts, newRows, headers, total);
+            if (total > 0) m_totalRowCount = total;
+            // Prepend
+            newRows.append(m_buffer);
+            m_buffer = newRows;
+            m_bufferPointer = fetchStart;
+
+            // Trim from bottom if buffer grew too large
+            int maxBuf = bufN + 2 * PREFETCH_MARGIN;
+            if (m_buffer.size() > maxBuf)
+                m_buffer.resize(maxBuf);
+        }
+    }
 }
 
 void LogWidget::fillBuffer() {
@@ -808,4 +986,233 @@ bool LogWidget::eventFilter(QObject* obj, QEvent* event) {
     }
 
     return QWidget::eventFilter(obj, event);
+}
+
+// ─── Text Find Bar Slots ──────────────────────────────────────────────────────────────
+
+void LogWidget::onToggleTextFindBar() {
+    if (!m_textFindBar) return;
+
+    // If in table view, switch to text view first
+    if (m_viewStack->currentIndex() != 1)
+        switchToTextView();
+
+    bool wasVisible = m_textFindBar->isVisible();
+    m_textFindBar->setVisible(!wasVisible);
+
+    if (!wasVisible) {
+        m_textFindCombo->lineEdit()->setFocus();
+        m_textFindCombo->lineEdit()->selectAll();
+    } else {
+        // Hide → clear highlights as well
+        onTextFindClear();
+    }
+}
+
+static void applyTextFindHighlights(
+    QTextBrowser* browser,
+    const QList<QTextEdit::ExtraSelection>& all,
+    int current)
+{
+    // Build a merged list: base (yellow) for all, override (orange) for current
+    QList<QTextEdit::ExtraSelection> merged = all;
+    if (current >= 0 && current < all.size()) {
+        QTextEdit::ExtraSelection active = all[current];
+        active.format.setBackground(QColor("#FF9900"));
+        active.format.setForeground(QColor("#000000"));
+        merged[current] = active;
+    }
+    browser->setExtraSelections(merged);
+
+    // Scroll to the active match
+    if (current >= 0 && current < all.size()) {
+        QTextCursor c = browser->textCursor();
+        c.setPosition(all[current].cursor.selectionStart());
+        browser->setTextCursor(c);
+        browser->ensureCursorVisible();
+    }
+}
+
+void LogWidget::onTextFindSearch() {
+    if (!m_textBrowser || !m_textFindCombo) return;
+
+    m_textFindHighlights.clear();
+    m_textFindCurrent = -1;
+
+    QString pattern = m_textFindCombo->currentText();
+    if (pattern.isEmpty()) {
+        m_textBrowser->setExtraSelections({});
+        if (m_textFindStatus) m_textFindStatus->setText("");
+        return;
+    }
+
+    // Update history
+    if (!m_textFindHistory.contains(pattern)) {
+        m_textFindHistory.prepend(pattern);
+        if (m_textFindHistory.size() > 20)
+            m_textFindHistory.removeLast();
+        // Rebuild combo items keeping the current text
+        m_textFindCombo->blockSignals(true);
+        m_textFindCombo->clear();
+        m_textFindCombo->addItems(m_textFindHistory);
+        m_textFindCombo->setCurrentText(pattern);
+        m_textFindCombo->blockSignals(false);
+    }
+
+    // Build regex
+    QRegularExpression::PatternOptions opts = QRegularExpression::NoPatternOption;
+    if (!m_textFindCase || !m_textFindCase->isChecked())
+        opts |= QRegularExpression::CaseInsensitiveOption;
+    QString regexStr = (m_textFindRegex && m_textFindRegex->isChecked())
+                       ? pattern
+                       : QRegularExpression::escape(pattern);
+    QRegularExpression re(regexStr, opts);
+    if (!re.isValid()) {
+        if (m_textFindStatus) m_textFindStatus->setText("Invalid regex");
+        return;
+    }
+
+    // Find all occurrences in the document
+    QTextDocument* doc = m_textBrowser->document();
+    QTextCursor cursor(doc);
+    cursor.movePosition(QTextCursor::Start);
+
+    QTextCharFormat baseFormat;
+    baseFormat.setBackground(QColor("#FFE066"));
+    baseFormat.setForeground(QColor("#000000"));
+
+    while (true) {
+        cursor = doc->find(re, cursor);
+        if (cursor.isNull()) break;
+        QTextEdit::ExtraSelection sel;
+        sel.cursor = cursor;
+        sel.format = baseFormat;
+        m_textFindHighlights.append(sel);
+    }
+
+    int total = m_textFindHighlights.size();
+    if (total == 0) {
+        m_textBrowser->setExtraSelections({});
+        if (m_textFindStatus) m_textFindStatus->setText("No matches");
+        return;
+    }
+
+    m_textFindCurrent = 0;
+    applyTextFindHighlights(m_textBrowser, m_textFindHighlights, m_textFindCurrent);
+    if (m_textFindStatus)
+        m_textFindStatus->setText(QString("%1 of %2").arg(1).arg(total));
+}
+
+void LogWidget::onTextFindNext() {
+    int total = m_textFindHighlights.size();
+    if (total == 0) { onTextFindSearch(); return; }
+
+    if (m_textFindCurrent == total - 1) {
+        // At last highlight: try to fetch more rows downward
+        int bufferEnd = m_bufferPointer + m_buffer.size();
+        if (bufferEnd < m_totalRowCount) {
+            int step = qMin(PREFETCH_MARGIN, m_totalRowCount - bufferEnd);
+            setPointer(m_bufferPointer + step, true);
+            // onTextFindSearch() is called by applyBufferToView()
+            // Navigate to the first highlight beyond the old last one
+            if (!m_textFindHighlights.isEmpty()) {
+                m_textFindCurrent = 0;
+                applyTextFindHighlights(m_textBrowser, m_textFindHighlights, m_textFindCurrent);
+                if (m_textFindStatus)
+                    m_textFindStatus->setText(
+                        QString("%1 of %2").arg(1).arg(m_textFindHighlights.size()));
+            }
+            return;
+        }
+        // No more rows: wrap to beginning
+    }
+
+    m_textFindCurrent = (m_textFindCurrent + 1) % total;
+    applyTextFindHighlights(m_textBrowser, m_textFindHighlights, m_textFindCurrent);
+    if (m_textFindStatus)
+        m_textFindStatus->setText(QString("%1 of %2").arg(m_textFindCurrent + 1).arg(total));
+}
+
+void LogWidget::onTextFindPrev() {
+    int total = m_textFindHighlights.size();
+    if (total == 0) { onTextFindSearch(); return; }
+
+    if (m_textFindCurrent == 0) {
+        // At first highlight: try to fetch more rows upward
+        if (m_bufferPointer > 0) {
+            int step = qMin(PREFETCH_MARGIN, m_bufferPointer);
+            setPointer(m_bufferPointer - step, true);
+            // Navigate to the last highlight in the new buffer
+            if (!m_textFindHighlights.isEmpty()) {
+                m_textFindCurrent = m_textFindHighlights.size() - 1;
+                applyTextFindHighlights(m_textBrowser, m_textFindHighlights, m_textFindCurrent);
+                if (m_textFindStatus)
+                    m_textFindStatus->setText(
+                        QString("%1 of %2").arg(m_textFindCurrent + 1)
+                                          .arg(m_textFindHighlights.size()));
+            }
+            return;
+        }
+        // No more rows above: wrap to end
+    }
+
+    m_textFindCurrent = (m_textFindCurrent - 1 + total) % total;
+    applyTextFindHighlights(m_textBrowser, m_textFindHighlights, m_textFindCurrent);
+    if (m_textFindStatus)
+        m_textFindStatus->setText(QString("%1 of %2").arg(m_textFindCurrent + 1).arg(total));
+}
+
+void LogWidget::onTextFindFirst() {
+    int total = m_textFindHighlights.size();
+    if (total == 0) { onTextFindSearch(); return; }
+
+    if (m_bufferPointer > 0) {
+        // Jump to DB start, then search from there
+        setPointer(0, true);
+        if (!m_textFindHighlights.isEmpty()) {
+            m_textFindCurrent = 0;
+            applyTextFindHighlights(m_textBrowser, m_textFindHighlights, m_textFindCurrent);
+            if (m_textFindStatus)
+                m_textFindStatus->setText(
+                    QString("1 of %1").arg(m_textFindHighlights.size()));
+        }
+        return;
+    }
+
+    m_textFindCurrent = 0;
+    applyTextFindHighlights(m_textBrowser, m_textFindHighlights, m_textFindCurrent);
+    if (m_textFindStatus)
+        m_textFindStatus->setText(QString("1 of %1").arg(total));
+}
+
+void LogWidget::onTextFindLast() {
+    int total = m_textFindHighlights.size();
+    if (total == 0) { onTextFindSearch(); return; }
+
+    int bufferEnd = m_bufferPointer + m_buffer.size();
+    if (bufferEnd < m_totalRowCount) {
+        // Jump to DB end, then search from there
+        setPointer(qMax(0, m_totalRowCount - 1), true);
+        if (!m_textFindHighlights.isEmpty()) {
+            m_textFindCurrent = m_textFindHighlights.size() - 1;
+            applyTextFindHighlights(m_textBrowser, m_textFindHighlights, m_textFindCurrent);
+            if (m_textFindStatus)
+                m_textFindStatus->setText(
+                    QString("%1 of %2").arg(m_textFindCurrent + 1)
+                                      .arg(m_textFindHighlights.size()));
+        }
+        return;
+    }
+
+    m_textFindCurrent = total - 1;
+    applyTextFindHighlights(m_textBrowser, m_textFindHighlights, m_textFindCurrent);
+    if (m_textFindStatus)
+        m_textFindStatus->setText(QString("%1 of %2").arg(total).arg(total));
+}
+
+void LogWidget::onTextFindClear() {
+    m_textFindHighlights.clear();
+    m_textFindCurrent = -1;
+    if (m_textBrowser) m_textBrowser->setExtraSelections({});
+    if (m_textFindStatus) m_textFindStatus->setText("");
 }

@@ -8,6 +8,7 @@
 #include <QTimer>
 #include <QVector>
 #include <QWidget>
+#include <QTextEdit>  // QTextEdit::ExtraSelection
 #include "logdatabase.h"
 #include "schemadetector.h"
 
@@ -67,6 +68,15 @@ private slots:
     void onCopySelection();
     void onCellClicked(const QModelIndex& proxyIndex);
 
+    // ── Text find bar ────────────────────────────────────────────────
+    void onToggleTextFindBar();
+    void onTextFindSearch();
+    void onTextFindNext();
+    void onTextFindPrev();
+    void onTextFindFirst();
+    void onTextFindLast();
+    void onTextFindClear();
+
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
 
@@ -90,6 +100,7 @@ private:
     void fillBuffer();                          // full DB fetch at p
     void updateBufferDelta(int delta);          // incremental fetch (±d rows)
     void applyBufferToView();                   // push m_buffer → model + text view
+    void checkPrefetch();                       // extend buffer by PREFETCH_MARGIN if near edge
 
     // ── Identity ─────────────────────────────────────────────────────
     QString m_filePath;
@@ -114,11 +125,26 @@ private:
     // ── Main layout ──────────────────────────────────────────────────
     QVBoxLayout* m_mainLayout = nullptr;
 
-    // ── Search bar ───────────────────────────────────────────────────
+    // ── FTS5 search bar (top bar — filters rows in DB) ───────────────
     QLineEdit*   m_searchEdit      = nullptr;
     QPushButton* m_searchButton    = nullptr;
-    QCheckBox*   m_highlightCheck  = nullptr;
     QCheckBox*   m_filterOnlyCheck = nullptr;
+
+    // ── Text Find Bar (find in QTextBrowser) ─────────────────────────
+    QWidget*     m_textFindBar     = nullptr;  // shown only in text view
+    QComboBox*   m_textFindCombo   = nullptr;  // editable with history
+    QPushButton* m_textFindFirst   = nullptr;
+    QPushButton* m_textFindPrev    = nullptr;
+    QPushButton* m_textFindNext    = nullptr;
+    QPushButton* m_textFindLast    = nullptr;
+    QPushButton* m_textFindClear   = nullptr;
+    QCheckBox*   m_textFindRegex   = nullptr;
+    QCheckBox*   m_textFindCase    = nullptr;
+    QLabel*      m_textFindStatus  = nullptr;
+    // internal state
+    QStringList  m_textFindHistory;
+    QList<QTextEdit::ExtraSelection> m_textFindHighlights;
+    int          m_textFindCurrent = -1;       // index into m_textFindHighlights
 
     // ── View area (stacked: table | text) + custom scrollbar ─────────
     QPushButton*          m_viewToggleButton = nullptr;
@@ -147,7 +173,8 @@ private:
     int m_sortCycle  = 0;  // 0=none 1=asc 2=desc
 
     // ── Virtual scroll state ─────────────────────────────────────────
-    static constexpr int DEFAULT_BUFFER = 5000;
+    static constexpr int DEFAULT_BUFFER  = 5000;
+    static constexpr int PREFETCH_MARGIN = 1000;  // rows to pre-load on each side
     int           m_bufferPointer = 0;    // p: absolute DB offset of buffer start
     int           m_totalRowCount = 0;    // total rows matching current filters
     QVector<QVector<QString>> m_buffer;   // N-row sliding window
