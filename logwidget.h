@@ -1,9 +1,6 @@
 #ifndef LOGWIDGET_H
 #define LOGWIDGET_H
 
-#include <QMap>
-#include <QSortFilterProxyModel>
-#include <QStandardItemModel>
 #include <QThread>
 #include <QTimer>
 #include <QVector>
@@ -13,20 +10,17 @@
 #include "schemadetector.h"
 
 class FileWorker;
-class QTableView;
 class QTextBrowser;
 class QLineEdit;
-class QPushButton;
 class QProgressBar;
 class QLabel;
 class QCheckBox;
 class QComboBox;
-class QGroupBox;
 class QVBoxLayout;
 class QHBoxLayout;
-class QStackedWidget;
 class QScrollBar;
 class QSpinBox;
+class QPushButton;
 
 // A single row in the dynamic filter panel:
 // [Logic▼] [Column▼] [Operator▼] [Value          ] [×]
@@ -61,12 +55,7 @@ private slots:
     void onError(int fileId, QString message);
 
     void onApplyFilters();   // resets p=0, forces full buffer fill
-    void onToggleView();
     void onWrapToggled(bool checked);
-
-    void onHeaderContextMenu(const QPoint& pos);
-    void onCopySelection();
-    void onCellClicked(const QModelIndex& proxyIndex);
 
     // ── Text find bar ────────────────────────────────────────────────
     void onToggleTextFindBar();
@@ -85,11 +74,8 @@ private:
     void updateFilterColumns();
     void addFilterRow(const QString& column = QString(), const QString& value = QString());
     void removeFilterRow(QWidget* container);
-    void applyColumnVisibility();
     void refreshData();                          // convenience: setPointer(p, force=true)
     QVector<Filter> collectFilters() const;
-    void switchToTextView();
-    void switchToTableView();
     void updateStatusLabel();
 
     // ── Virtual scroll / buffer ──────────────────────────────────────
@@ -99,7 +85,7 @@ private:
     void setPointer(int p, bool force = false); // set p, update buffer & view
     void fillBuffer();                          // full DB fetch at p
     void updateBufferDelta(int delta);          // incremental fetch (±d rows)
-    void applyBufferToView();                   // push m_buffer → model + text view
+    void applyBufferToView();                   // push m_buffer → text view
     void checkPrefetch();                       // extend buffer by PREFETCH_MARGIN if near edge
 
     // ── Identity ─────────────────────────────────────────────────────
@@ -113,10 +99,6 @@ private:
     // ── Schema & column metadata ─────────────────────────────────────
     QVector<ColumnDef> m_columns;
     QStringList        m_filterColumnNames;
-    bool               m_hasDynamicColumns = false;
-
-    // ── Per-column visibility ────────────────────────────────────────
-    QMap<QString, bool> m_columnVisibility;
 
     // ── Ingestion debounce timer ─────────────────────────────────────
     QTimer* m_refreshTimer = nullptr;
@@ -126,12 +108,11 @@ private:
     QVBoxLayout* m_mainLayout = nullptr;
 
     // ── FTS5 search bar (top bar — filters rows in DB) ───────────────
-    QLineEdit*   m_searchEdit      = nullptr;
-    QPushButton* m_searchButton    = nullptr;
-    QCheckBox*   m_filterOnlyCheck = nullptr;
+    QLineEdit*   m_searchEdit   = nullptr;
+    QPushButton* m_searchButton = nullptr;
 
     // ── Text Find Bar (find in QTextBrowser) ─────────────────────────
-    QWidget*     m_textFindBar     = nullptr;  // shown only in text view
+    QWidget*     m_textFindBar     = nullptr;
     QComboBox*   m_textFindCombo   = nullptr;  // editable with history
     QPushButton* m_textFindFirst   = nullptr;
     QPushButton* m_textFindPrev    = nullptr;
@@ -146,18 +127,12 @@ private:
     QList<QTextEdit::ExtraSelection> m_textFindHighlights;
     int          m_textFindCurrent = -1;       // index into m_textFindHighlights
 
-    // ── View area (stacked: table | text) + custom scrollbar ─────────
-    QPushButton*          m_viewToggleButton = nullptr;
-    QStackedWidget*       m_viewStack        = nullptr;
-    QTableView*           m_tableView        = nullptr;
-    QTextBrowser*         m_textBrowser      = nullptr;
-    QStandardItemModel*   m_tableModel       = nullptr;
-    QSortFilterProxyModel* m_proxyModel      = nullptr;
-    QCheckBox*            m_wrapCheck        = nullptr;
-    QScrollBar*           m_logScrollBar     = nullptr;  // independent vertical scrollbar
+    // ── Text view + custom scrollbar ─────────────────────────────────
+    QTextBrowser* m_textBrowser  = nullptr;
+    QCheckBox*    m_wrapCheck    = nullptr;
+    QScrollBar*   m_logScrollBar = nullptr;  // independent vertical scrollbar
 
     // ── Filter panel ─────────────────────────────────────────────────
-    QGroupBox*   m_filterGroup  = nullptr;
     QVBoxLayout* m_filterLayout = nullptr;
     QVector<FilterRow> m_filterRows;
 
@@ -167,10 +142,6 @@ private:
     QLabel*       m_labelState   = nullptr;
     QProgressBar* m_progressBar  = nullptr;
     QSpinBox*     m_bufferSizeSpin = nullptr;  // configurable N (buffer size)
-
-    // ── 3-state sort (none → asc → desc → none) ──────────────────────
-    int m_sortColumn = -1;
-    int m_sortCycle  = 0;  // 0=none 1=asc 2=desc
 
     // ── Virtual scroll state ─────────────────────────────────────────
     static constexpr int DEFAULT_BUFFER  = 5000;

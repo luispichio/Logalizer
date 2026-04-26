@@ -152,14 +152,11 @@ MainWindow
 - Constructor recibe `filePath` y `fileId`.
 - Crea y posee el `FileWorker` y su `QThread`.
 - **Debounce**: `onChunkInserted` reinicia un `QTimer` (1.5s single-shot). `refreshData()` se llama solo al dispararse el timer. `onFinished` lo cancela y hace el refresh final.
-- **Paginación**: `QSpinBox* m_offsetSpin` (offset de inicio) y `QSpinBox* m_limitSpin` (filas por página, default 1000). Al aplicar filtros → offset se resetea a 0.
-- **Scroll automático**: `verticalScrollBar::valueChanged` en `QTableView` y `QTextBrowser` → si llega al máximo y `offset + limit < totalCount`, incrementa offset y llama `refreshData()`.
+- **Paginación**: buffer deslizante configurable. Al aplicar filtros → la posición vuelve al inicio.
+- **Scroll automático**: `eventFilter` sobre `QTextBrowser` traduce wheel/teclas a movimiento del buffer y sincroniza `m_logScrollBar`.
 - **Filtros**: Panel de filas dinámicas `FilterRow` (Logic + Column + Operator + Value + Remove). Ilimitadas. `addFilterRow()` / `removeFilterRow()`. La columna en el filter es el nombre **original** (`col.name`).
-- **Visibilidad de columnas**: clic derecho en header → `QMenu` con checkboxes. Estado persiste en `m_columnVisibility`. La columna `raw` está oculta por defecto cuando hay columnas dinámicas.
-- **Ordenamiento**: `QSortFilterProxyModel` con `setSortingEnabled(true)`.
-- **Copia**: Ctrl+C → clipboard tab-separated, newline por fila.
-- **Cell-to-filter**: clic en celda → busca FilterRow vacío para esa columna o crea uno nuevo.
-- **Vista por defecto**: `text` si no hay columnas dinámicas; `table` si las hay.
+- **Vista**: única vista de texto en `QTextBrowser`, con wrap configurable.
+- **Búsqueda interna**: barra `Ctrl+F` con resaltado, navegación `F3` / `Shift+F3` y soporte opcional de regex/case-sensitive.
 - **Status bar**: `Size | Lines | Offset [spin] | Rows [spin] | ... | Rows X–Y of Z | [progress]`.
 
 ---
@@ -212,6 +209,6 @@ Ver tabla completa en [`README.md`](./README.md#-roadmap-y-funcionalidades-desea
 
 1. **Resaltado de búsqueda** en `QTextBrowser` con FTS5 `snippet()`.
 2. **Tests unitarios** (`QtTest`) para `SchemaDetector` (sanitize, detect, dedup) y `LogDatabase` (híbrido, filtros, JOIN).
-3. **Ordenamiento DB-side**: pasar `ORDER BY col ASC/DESC` a `queryRows` al hacer clic en el header (en lugar del sort in-memory actual).
+3. **Exportación de resultados** filtrados/buscados a JSONL o CSV.
 4. **Soporte de archivos comprimidos** (`.gz`, `.zip`) — descompresión en memoria antes de ingestar.
 5. **Apertura de múltiples archivos en una misma tabla** (merge de schemas).

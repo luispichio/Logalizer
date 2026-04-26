@@ -41,21 +41,13 @@ Por cada archivo abierto se crean **dos tablas** en la DB in-memory (`:memory:`)
 
 ### 2.3 UI — Vista de Datos
 
-- **Vista dual**: tabla estructurada ↔ texto plano, con botón de toggle.
-  - Vista por defecto: `text` si no hay columnas dinámicas (archivo no JSONL); `table` si las hay.
+- **Vista única de texto**: muestra el campo `raw` de cada fila en `QTextBrowser`.
+  - Incluye búsqueda dentro del buffer visible (`Ctrl+F`, `F3`, `Shift+F3`) y wrap configurable.
 - **Paginación configurable**:
   - Controles en la barra de estado: `Offset [spinbox]` y `Rows [spinbox]` (default 1000, rango 10–100k).
   - El status bar muestra `Rows X–Y of Z`.
-  - Al hacer scroll hasta el final de la tabla o del texto → incrementa offset automáticamente y recarga.
+  - Al hacer scroll en el texto → incrementa offset automáticamente y recarga.
   - Al aplicar filtros → offset se resetea a 0.
-- **Vista Tabla**:
-  - Ordenamiento ascendente/descendente haciendo clic en el header (`QSortFilterProxyModel`).
-  - Columnas ocultables/mostrables: clic derecho en el header → menú contextual con checkboxes. Estado persiste en `m_columnVisibility`.
-  - Columna `raw` oculta por defecto cuando hay columnas dinámicas.
-  - Selección múltiple de celdas (`ExtendedSelection`).
-  - Ctrl+C copia las celdas seleccionadas al portapapeles (tab-separated, newline por fila).
-  - Clic en una celda → pre-rellena un filtro con el nombre de columna y valor de la celda.
-- **Vista Texto**: muestra el campo `raw` de cada fila en `QTextBrowser`; wrap configurable.
 
 ### 2.4 UI — Panel de Filtros
 
@@ -91,7 +83,7 @@ Por cada archivo abierto se crean **dos tablas** en la DB in-memory (`:memory:`)
 Logalizer/
 ├── main.cpp                  # Entry point
 ├── mainwindow.h/cpp          # Ventana principal, gestión de tabs, open dialog, About
-├── logwidget.h/cpp           # Widget por pestaña: UI, filtros, vista dual, paginación
+├── logwidget.h/cpp           # Widget por pestaña: UI, filtros, vista de texto, paginación
 ├── fileworker.h/cpp          # Hilo de ingesta: schema detection + chunked insert
 ├── schemadetector.h/cpp      # Detección automática de columnas + sanitizedName
 ├── logdatabase.h/cpp         # Singleton: esquema híbrido meta+FTS5, thread-safe

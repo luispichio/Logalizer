@@ -15,10 +15,8 @@ La idea es crear una alternativa "más simple de usar por el público general" a
 - **Multihilo & Asincronismo**: La lectura e inserción de logs ocurre en hilos de background (chunks de 5.000 líneas). Un debounce de 1.5 segundos garantiza que la UI permanezca fluida durante la carga.
 - **Gestión Eficiente de Memoria**: Aislamiento total de recursos. Cada log abierto vive en sus propias tablas temporales. Al cerrar la pestaña, `DROP TABLE` libera la RAM instantáneamente.
 - **Búsqueda Cruzada (Aggregate Search)**: `UNION ALL` transparente sobre las tablas meta de todos los archivos cargados.
-- **Filtros Dinámicos Múltiples**: Panel de filas ilimitadas. Cada fila: selector de columna, operador (`contains`, `=`, `!=`, `>`, `<`) y lógica (AND/OR/NOT). Clic en celda → pre-rellena el filtro automáticamente.
-- **Vista Dual Inteligente**: Alterna entre tabla estructurada y texto plano.
-  - **Tabla**: ordenamiento por header (click), visibilidad de columnas (clic derecho en header), columna `raw` oculta por defecto, selección múltiple de celdas, Ctrl+C para copiar.
-  - **Texto**: vista predeterminada para archivos sin estructura JSON.
+- **Filtros Dinámicos Múltiples**: Panel de filas ilimitadas. Cada fila: selector de columna, operador (`contains`, `=`, `!=`, `>`, `<`) y lógica (AND/OR/NOT).
+- **Vista de Texto Enfocada**: El contenido se presenta directamente en `QTextBrowser`, con wrap configurable y búsqueda incremental dentro del buffer visible (`Ctrl+F`, `F3`, `Shift+F3`).
 - **Paginación Configurable**: Controles de `Offset` y `Rows` en la barra de estado. Al hacer scroll hasta el final → avanza automáticamente al siguiente bloque de filas.
 
 ## 🛠️ Stack Tecnológico
@@ -35,13 +33,12 @@ La idea es crear una alternativa "más simple de usar por el público general" a
 | ⏳ | **Resaltado de Búsqueda** | Implementar resaltado visual de coincidencias FTS5 en `QTextBrowser` (snippets). |
 | ⏳ | **Exportación de Resultados** | Exportar las filas filtradas/buscadas a un nuevo archivo JSONL o CSV. |
 | ⏳ | **Tests Unitarios** | Cobertura sobre `SchemaDetector` (parseo JSON, heurística ISO-8601) y `LogDatabase` (híbrido). Usar `QtTest`. |
-| ⏳ | **Guardar/Cargar Workspaces** | Guardar sesiones: archivos abiertos, filtros activos, visibilidad de columnas. |
+| ⏳ | **Guardar/Cargar Workspaces** | Guardar sesiones: archivos abiertos y filtros activos. |
 | ⏳ | **Gráficos de Frecuencia** | Mini-histograma de volumen de logs en función del tiempo (campos `Date`). |
 | ⏳ | **Parser Genérico de Texto** | Soporte para logs no-JSON mediante expresiones regulares (Grok-like). |
 | ⏳ | **Cliente SFTP** | Conectarse a servidores remotos y descargar logs directamente. |
 | ⏳ | **Apertura múltiple (misma tabla)** | Seleccionar múltiples archivos para abrirlos en la misma tabla (merge de schemas). |
 | ⏳ | **Archivos comprimidos (.zip, .gz)** | Soporte para apertura de archivos comprimidos (logrotate). |
-| ⏳ | **Ordenamiento DB-side** | `ORDER BY` en SQL al hacer clic en el header (complementa el sort en memoria actual). |
 
 ## 🚀 Instalación y Compilación
 
