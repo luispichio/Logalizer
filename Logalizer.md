@@ -1,11 +1,11 @@
 # Definición del Proyecto: Logalizer
 
-Este archivo `Logalizer.md` sirve como la fuente de verdad para el contexto del proyecto. Debe ser actualizado a medida que el proyecto evoluciona para mantener al equipo y a los asistentes de IA alineados.
+Este archivo `Logalizer.md` es la fuente de verdad del proyecto.
 
 ## 1. Visión General y Objetivos
 
-- **Descripción**: Aplicación de Escritorio para análisis de logs tipo "json lines" de alto rendimiento.
-- **Objetivo Principal**: Crear una herramienta capaz de procesar y visualizar grandes volúmenes de logs eficientemente.
+- **Descripción**: Aplicación de escritorio para análisis de logs de alto rendimiento.
+- **Objetivo principal**: abrir logs grandes, buscar texto rápido y navegar resultados por tiempo sin configuración previa.
 - **Plataforma**: Desktop (Linux, Windows).
 - **Repositorio**: https://github.com/luispichio/Logalizer
 
@@ -13,102 +13,99 @@ Este archivo `Logalizer.md` sirve como la fuente de verdad para el contexto del 
 
 ### 2.1 Procesamiento de Archivos
 
-- Multithreaded: lectura e ingesta en hilos de background (`FileWorker` en `QThread`).
-- Capacidad de abrir múltiples archivos de logs concurrentemente (un tab por archivo).
-- **Detección automática de formato**: escaneo de hasta 10.000 líneas para detectar el esquema JSONL.
-  - Cada campo JSON presente en el ≥80% de las líneas se convierte en una columna indexada.
-  - Campos de tipo objeto o array no se indexan (van solo en `raw`).
-  - **Saneamiento de nombres**: los caracteres especiales (`@`, `.`, `-`, espacios, etc.) en los nombres de campo se reemplazan por `_` para generar un `sanitizedName` válido para SQLite. Las colisiones tras saneamiento se numeran (`_foo_2`, `_foo_3`, …).
-  - Columnas mínimas obligatorias: `raw`, `file_position`, `line_number`.
+- Ingesta multihilo: `FileWorker` corre en un `QThread` dedicado.
+- Múltiples archivos abiertos concurrentemente, un tab por archivo.
+- Cada línea persiste siempre:
+  - `raw`
+  - `file_position`
+  - `line_number`
+  - `timestamp_text` opcional
+  - `timestamp_unix_ms` opcional
+  - `timestamp_source` opcional
+- La detección de timestamp sigue esta prioridad:
+  - campos JSON comunes: `@timestamp`, `timestamp`, `time`, `ts`, `datetime`, `date`
+  - cualquier string JSON que parezca fecha
+  - regex sobre la línea cruda
 
-### 2.2 Base de Datos — Esquema Híbrido
+### 2.2 Base de Datos
 
-Por cada archivo abierto se crean **dos tablas** en la DB in-memory (`:memory:`):
+Por cada archivo abierto se crean dos tablas in-memory:
 
 | Tabla | Tipo SQLite | Contenido | Propósito |
 |---|---|---|---|
-| `logs_meta_{id}` | Tabla regular | `line_number` (PK/rowid), `file_position`, `raw`, todas las columnas dinámicas | Filtros numéricos/fecha con índice B-tree; JOIN con FTS |
-| `logs_fts_{id}` | Virtual FTS5 | `raw` + columnas String/Date | Full-text search con índice invertido |
+| `logs_meta_{id}` | Tabla regular | `line_number`, `file_position`, `raw`, `timestamp_text`, `timestamp_unix_ms`, `timestamp_source` | navegación, filtro temporal, orden |
+| `logs_fts_{id}` | Virtual FTS5 | `raw` | full-text search |
 
-- **Índices B-tree en meta**: creados automáticamente para columnas tipo `Number` y `Date`. También en `file_position`.
-- **JOIN por rowid**: `logs_fts_{id}.rowid = logs_meta_{id}.line_number` → costo cero (line_number es el rowid alias al ser INTEGER PRIMARY KEY).
-- **Estrategia de consulta**:
-  - Si hay FTS query global → `JOIN + FTS MATCH` → usa índice invertido.
-  - Filtros de columna → `WHERE m.col LIKE/=/>/< ?` → usa índices B-tree.
-  - Sin FTS → solo tabla meta (no hay JOIN innecesario).
-- Al cerrar un archivo → `DROP TABLE` sobre ambas tablas → RAM liberada inmediatamente.
-- Búsqueda agregada: si el usuario no filtra por archivo, `searchAll` ejecuta `UNION ALL` sobre todas las tablas meta activas.
+- Índices B-tree en `logs_meta_{id}`:
+  - `file_position`
+  - `timestamp_unix_ms`
+- JOIN por `rowid`:
+  - `logs_fts_{id}.rowid = logs_meta_{id}.line_number`
+- Estrategia de consulta:
+  - FTS → `MATCH` sobre `logs_fts_{id}`
+  - rango temporal → filtro sobre `timestamp_unix_ms`
+  - orden → por `line_number` o `timestamp_unix_ms`
+- Al cerrar un archivo se hace `DROP TABLE` sobre meta y FTS para liberar RAM.
 
-### 2.3 UI — Vista de Datos
+### 2.3 UI
 
-- **Vista única de texto**: muestra el campo `raw` de cada fila en `QTextBrowser`.
-  - Incluye búsqueda dentro del buffer visible (`Ctrl+F`, `F3`, `Shift+F3`) y wrap configurable.
-- **Paginación configurable**:
-  - Controles en la barra de estado: `Offset [spinbox]` y `Rows [spinbox]` (default 1000, rango 10–100k).
-  - El status bar muestra `Rows X–Y of Z`.
-  - Al hacer scroll en el texto → incrementa offset automáticamente y recarga.
-  - Al aplicar filtros → offset se resetea a 0.
+- Vista única de texto en `QTextBrowser`.
+- Búsqueda local dentro del buffer visible:
+  - `Ctrl+F`
+  - `F3`
+  - `Shift+F3`
+  - regex opcional
+  - case-sensitive opcional
+- Filtros globales simples:
+  - búsqueda FTS
+  - `From`
+  - `To`
+  - `Only with timestamp`
+  - orden por línea o timestamp
+- Paginación mediante buffer deslizante configurable.
 
-### 2.4 UI — Panel de Filtros
+### 2.4 Rendimiento
 
-- Filas de filtro ilimitadas (no hay límite por columna).
-- Cada fila: `[Logic▼] [Columna▼] [Operador▼] [Valor...] [×]`
-  - Logic: AND / OR / NOT
-  - Operadores: `contains`, `=`, `!=`, `>`, `<`
-- Botón **＋ Add Filter** agrega filas; `[×]` las elimina individualmente.
-- Al aplicar filtros o presionar Enter en el valor → offset se resetea a 0.
-- Búsqueda global FTS5: campo de texto separado arriba → `MATCH` sobre `logs_fts_{id}`.
-- Opción "Filter only": cuando está activa solo se muestran las filas que cumplen los filtros.
-
-### 2.5 Rendimiento
-
-- **Ingesta**: `FileWorker` en `QThread`. Chunks de 5.000 líneas con transacciones SQLite → minimiza lock de mutex.
-- **Debounce**: `onChunkInserted` reinicia un `QTimer` de 1.5 segundos. `refreshData()` solo se llama al finalizar el timer (no en cada chunk). `onFinished` cancela el timer y hace el refresh final.
-- **Consultas**: el hilo de UI ejecuta `queryRows()` que adquiere el mutex solo el tiempo de la query. Los índices B-tree y FTS garantizan consultas sublineales en la mayoría de los casos.
+- Inserts por lotes de 5.000 líneas dentro de transacciones SQLite.
+- `onChunkInserted` usa debounce de 1.5 s para evitar refrescos agresivos.
+- El hilo de UI nunca espera lecturas de archivo ni parseo de disco.
 
 ## 3. Stack Tecnológico
 
 | Componente | Tecnología |
 |---|---|
-| Lenguaje | **C++17** (sin excepciones, RAII estricto) |
-| UI Framework | **Qt6 Widgets** (UI 100% programática, sin `.ui` files) |
-| Base de Datos | **SQLite** con módulo **FTS5** — esquema híbrido en `:memory:` |
-| Build System | **CMake + Ninja** (vía Qt Creator) |
+| Lenguaje | **C++17** |
+| UI Framework | **Qt6 Widgets** |
+| Base de Datos | **SQLite + FTS5** en `:memory:` |
+| Build System | **CMake + Ninja** |
 
-> El stack es **fijo**. No proponer migración a otros frameworks sin discusión previa del propietario.
+## 4. Estructura de Archivos
 
-## 4. Arquitectura y Estructura de Archivos
-
-```
+```text
 Logalizer/
-├── main.cpp                  # Entry point
-├── mainwindow.h/cpp          # Ventana principal, gestión de tabs, open dialog, About
-├── logwidget.h/cpp           # Widget por pestaña: UI, filtros, vista de texto, paginación
-├── fileworker.h/cpp          # Hilo de ingesta: schema detection + chunked insert
-├── schemadetector.h/cpp      # Detección automática de columnas + sanitizedName
-├── logdatabase.h/cpp         # Singleton: esquema híbrido meta+FTS5, thread-safe
-├── linerecord.h              # Struct LineRecord: fields (sanitizedName→value), raw, pos
-├── CMakeLists.txt            # Build config
-├── Logalizer.md              # Fuente de verdad del proyecto (este archivo)
-├── README.md                 # Descripción pública (GitHub)
-└── AGENTS.md                 # Guía para asistentes de IA
+├── main.cpp
+├── mainwindow.h/cpp
+├── logwidget.h/cpp
+├── fileworker.h/cpp
+├── logdatabase.h/cpp
+├── linerecord.h
+├── CMakeLists.txt
+├── Logalizer.md
+├── README.md
+└── AGENTS.md
 ```
-
-> Los archivos `safequeue.*`, `logdb.*`, `mainwindow.ui` y `logwidget.ui` fueron eliminados. No reinstanciarlos.
 
 ## 5. Convenciones de Desarrollo
 
-- **Rendimiento**: Prioridad absoluta. Nunca bloquear el hilo de UI.
-- **Threading**: `LogDatabase` usa `QMutexLocker` en todas sus APIs públicas. No crear conexiones SQLite adicionales.
-- **Naming**: código fuente en inglés. Documentación interna puede ser en español.
-- **Logging**: `qInfo()`, `qDebug()`, `qWarning()`, `qCritical()`. No usar `std::cout`.
-- **Testing**: Tests unitarios obligatorios para parsers (`SchemaDetector`) y lógica de DB. Framework: `QtTest`.
+- Rendimiento primero: nunca bloquear el hilo de UI.
+- Toda operación pública de `LogDatabase` usa `QMutexLocker`.
+- Código fuente en inglés; documentación interna puede estar en español.
+- Logging con `qInfo()`, `qDebug()`, `qWarning()`, `qCritical()`.
 
-## 6. Instrucciones para la IA
+## 6. Instrucciones Para IA
 
-1. **Leer este archivo primero** antes de diseñar cualquier implementación.
-2. **Verificar el stack** antes de proponer dependencias externas — requiere aprobación del propietario.
-3. **No romper threading**: toda operación sobre `LogDatabase` desde un hilo secundario debe usar los métodos thread-safe del singleton.
-4. **UI programática siempre**: sin archivos `.ui` ni Qt Designer.
-5. **Actualizar `CMakeLists.txt`** si se añaden/eliminan archivos fuente.
-6. **Mantener coherencia sanitizedName ↔ DB**: `record.fields` usa `sanitizedName` como clave; los headers de UI muestran `name` (original). `LogDatabase` traduce de nombre original a sanitizedName al construir SQL.
+1. Leer este archivo antes de diseñar cambios importantes.
+2. No agregar dependencias externas sin aprobación explícita.
+3. Mantener UI programática; no usar `.ui`.
+4. No crear conexiones SQLite alternativas fuera de `LogDatabase`.
+5. Si se agregan o eliminan archivos fuente, actualizar `CMakeLists.txt`.

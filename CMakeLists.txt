@@ -61,7 +61,6 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         linerecord.h
         fileworker.h fileworker.cpp
         logdatabase.h logdatabase.cpp
-        schemadetector.h schemadetector.cpp
     )
 
     qt_create_translation(QM_FILES ${CMAKE_SOURCE_DIR} ${TS_FILES})
@@ -129,8 +128,8 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "High-performance JSON Lines log analyzer — desktop alternative to lnav")
 set(CPACK_PACKAGE_DESCRIPTION
     "Logalizer is a desktop application for analysing JSONL log files.\n"
-    "It uses an in-memory SQLite hybrid schema (B-tree + FTS5) for fast\n"
-    "filtering and full-text search without any configuration.")
+    "It uses an in-memory SQLite FTS5 index plus fixed timestamp metadata\n"
+    "for fast text search and time-range filtering without configuration.")
 set(CPACK_RESOURCE_FILE_LICENSE     "${CMAKE_SOURCE_DIR}/LICENSE")
 
 # .deb (Debian / Ubuntu)

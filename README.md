@@ -1,44 +1,36 @@
 # Logalizer
 
-Logalizer es una aplicación de escritorio de alto rendimiento diseñada específicamente para el análisis y búsqueda eficiente de archivos de logs en formato "JSON Lines" (JSONL). Construida con **C++17**, **Qt6** y apuntalada por bases de datos in-memory **SQLite + FTS5** (Full-Text Search) con esquema híbrido, Logalizer está pensada para manejar grandes volúmenes de datos sin comprometer la fluidez de la interfaz de usuario.
-
-La idea es crear una alternativa "más simple de usar por el público general" a la aplicación de terminal [The Logfile Navigator](https://lnav.org/), intentando mantener un balance entre las funcionalidades (las justas) y la simplicidad de uso.
+Logalizer es una aplicación de escritorio para analizar archivos de logs con foco en dos tareas: buscar texto rápido y recortar por tiempo sin configuración previa. Está construida con **C++17**, **Qt6** y **SQLite + FTS5** en memoria.
 
 ## 🚀 Características Principales
 
-- **Auto-Detección Inteligente de Esquemas**: Escanea las primeras líneas (hasta 10.000) de cada archivo de log para entender su estructura. Los campos JSON presentes en al menos el 80% de las líneas se convierten automáticamente en columnas indexadas. Los nombres de campos con caracteres especiales (`@`, `.`, `-`, espacios, etc.) se sanean automáticamente para compatibilidad con SQLite.
-- **Esquema Híbrido SQLite (meta + FTS5)**: Por cada archivo se crean dos tablas en memoria:
-  - `logs_meta_{id}`: Tabla regular con **índices B-tree** sobre columnas `Number` y `Date` → rangos numéricos y temporales ultrarrápidos.
-  - `logs_fts_{id}`: Tabla virtual **FTS5** con el texto (`raw` + columnas `String`/`Date`) → full-text search con índice invertido.
-  - Las consultas combinan ambas con `JOIN por rowid`, usando cada índice según el tipo de filtro.
-- **Búsqueda Ultrarrápida**: Filtros de texto usan `FTS5 MATCH` (índice invertido); filtros numéricos/fecha usan el índice B-tree del meta. Sin full-scans para operaciones comunes.
-- **Multihilo & Asincronismo**: La lectura e inserción de logs ocurre en hilos de background (chunks de 5.000 líneas). Un debounce de 1.5 segundos garantiza que la UI permanezca fluida durante la carga.
-- **Gestión Eficiente de Memoria**: Aislamiento total de recursos. Cada log abierto vive en sus propias tablas temporales. Al cerrar la pestaña, `DROP TABLE` libera la RAM instantáneamente.
-- **Búsqueda Cruzada (Aggregate Search)**: `UNION ALL` transparente sobre las tablas meta de todos los archivos cargados.
-- **Filtros Dinámicos Múltiples**: Panel de filas ilimitadas. Cada fila: selector de columna, operador (`contains`, `=`, `!=`, `>`, `<`) y lógica (AND/OR/NOT).
-- **Vista de Texto Enfocada**: El contenido se presenta directamente en `QTextBrowser`, con wrap configurable y búsqueda incremental dentro del buffer visible (`Ctrl+F`, `F3`, `Shift+F3`).
-- **Paginación Configurable**: Controles de `Offset` y `Rows` en la barra de estado. Al hacer scroll hasta el final → avanza automáticamente al siguiente bloque de filas.
+- **Búsqueda Full-Text con FTS5**: cada archivo abierto crea un índice FTS5 sobre `raw` para búsquedas rápidas sin full-scan en la mayoría de los casos.
+- **Metadatos temporales fijos**: además del índice de texto, cada línea guarda `line_number`, `file_position` y un timestamp detectado opcional para filtrar por rango temporal y ordenar por fecha.
+- **Detección automática de timestamp**: prioriza campos JSON comunes como `@timestamp`, `timestamp`, `time` o `datetime`; si no encuentra uno, intenta detectar fechas directamente en el texto crudo.
+- **Multihilo y UI fluida**: la ingesta ocurre en un `QThread` con inserts por lotes y refresco con debounce para no bloquear la interfaz.
+- **Vista de texto enfocada**: el contenido se muestra en `QTextBrowser`, con wrap configurable y búsqueda dentro del buffer visible (`Ctrl+F`, `F3`, `Shift+F3`).
+- **Filtro temporal simple**: permite combinar búsqueda FTS con rango `From/To`, opción `Only with timestamp` y orden por línea o por timestamp.
+- **Aislamiento por pestaña**: cada archivo vive en sus propias tablas in-memory y al cerrar la pestaña se liberan inmediatamente.
 
 ## 🛠️ Stack Tecnológico
 
 - **Lenguaje**: C++17
-- **Framework UI**: Qt6 (Widgets)
-- **Base de Datos**: SQLite (módulo FTS5 integrado) — esquema híbrido meta + FTS5
-- **Build System**: CMake + Ninja (vía Qt Creator)
+- **Framework UI**: Qt6 Widgets
+- **Base de Datos**: SQLite + FTS5 en `:memory:`
+- **Build System**: CMake + Ninja
 
 ## 📋 Roadmap y Funcionalidades Deseadas (ToDo)
 
 | Estado | Característica / Tarea | Descripción |
 |:---:|---|---|
-| ⏳ | **Resaltado de Búsqueda** | Implementar resaltado visual de coincidencias FTS5 en `QTextBrowser` (snippets). |
-| ⏳ | **Exportación de Resultados** | Exportar las filas filtradas/buscadas a un nuevo archivo JSONL o CSV. |
-| ⏳ | **Tests Unitarios** | Cobertura sobre `SchemaDetector` (parseo JSON, heurística ISO-8601) y `LogDatabase` (híbrido). Usar `QtTest`. |
-| ⏳ | **Guardar/Cargar Workspaces** | Guardar sesiones: archivos abiertos y filtros activos. |
-| ⏳ | **Gráficos de Frecuencia** | Mini-histograma de volumen de logs en función del tiempo (campos `Date`). |
-| ⏳ | **Parser Genérico de Texto** | Soporte para logs no-JSON mediante expresiones regulares (Grok-like). |
+| ⏳ | **Resaltado de Búsqueda** | Integrar snippets o resaltado alineado a resultados FTS5. |
+| ⏳ | **Exportación de Resultados** | Exportar las filas filtradas/buscadas a JSONL o CSV. |
+| ⏳ | **Tests Unitarios** | Cobertura sobre detección de timestamps y consultas en `LogDatabase`. |
+| ⏳ | **Guardar/Cargar Workspaces** | Guardar sesiones: archivos abiertos y filtros temporales activos. |
+| ⏳ | **Gráficos de Frecuencia** | Mini-histograma de volumen de logs en función del tiempo detectado. |
+| ⏳ | **Parser Genérico de Texto** | Soporte para logs no-JSON mediante expresiones regulares. |
 | ⏳ | **Cliente SFTP** | Conectarse a servidores remotos y descargar logs directamente. |
-| ⏳ | **Apertura múltiple (misma tabla)** | Seleccionar múltiples archivos para abrirlos en la misma tabla (merge de schemas). |
-| ⏳ | **Archivos comprimidos (.zip, .gz)** | Soporte para apertura de archivos comprimidos (logrotate). |
+| ⏳ | **Archivos comprimidos (.zip, .gz)** | Soporte para apertura de archivos comprimidos. |
 
 ## 🚀 Instalación y Compilación
 
@@ -55,40 +47,32 @@ sudo dnf install cmake ninja-build qt6-qtbase-devel
 ### Compilar desde fuentes
 
 ```bash
-# Clonar el repositorio
 git clone https://github.com/luispichio/Logalizer.git
 cd Logalizer
 
-# Configurar (Release)
 cmake -B build-release -DCMAKE_BUILD_TYPE=Release -G Ninja
-
-# Compilar
 cmake --build build-release --parallel
 
-# Ejecutar directamente
 ./build-release/Logalizer
 ```
 
 *(El proyecto se soporta y testea habitualmente con **Qt Creator** utilizando Ninja como generador).*
 
----
-
 ## 📦 Packaging
 
-El sistema de packaging está integrado en CMake vía **CPack**.  
-La versión del paquete se genera automáticamente a partir de `MAJOR.MINOR.BUILD`, donde `BUILD` se incrementa con cada commit de Git.
+El sistema de packaging está integrado en CMake vía **CPack**. La versión del paquete se genera automáticamente a partir de `MAJOR.MINOR.BUILD`, donde `BUILD` se incrementa con cada commit de Git.
 
 ### Prerrequisitos adicionales
 
 ```bash
-# Debian / Ubuntu  (.deb)
+# Debian / Ubuntu (.deb)
 sudo apt install dpkg-dev
 
-# Fedora / openSUSE  (.rpm)
+# Fedora / openSUSE (.rpm)
 sudo dnf install rpm-build
 ```
 
-### Generar `.deb` (Debian / Ubuntu)
+### Generar `.deb`
 
 ```bash
 cmake -B build-release -DCMAKE_BUILD_TYPE=Release -G Ninja
@@ -97,17 +81,7 @@ cd build-release
 cpack -G DEB
 ```
 
-Genera: `logalizer_0.2.<build>_amd64.deb`
-
-```bash
-# Instalar
-sudo dpkg -i logalizer_0.2.*_amd64.deb
-
-# Desinstalar
-sudo dpkg -r logalizer
-```
-
-### Generar `.rpm` (Fedora / openSUSE)
+### Generar `.rpm`
 
 ```bash
 cmake -B build-release -DCMAKE_BUILD_TYPE=Release -G Ninja
@@ -116,27 +90,12 @@ cd build-release
 cpack -G RPM
 ```
 
-Genera: `logalizer-0.2.<build>.x86_64.rpm`
-
-```bash
-# Instalar
-sudo rpm -i logalizer-0.2.*.x86_64.rpm
-
-# Desinstalar
-sudo rpm -e logalizer
-```
-
-### Generar `.tar.gz` (universal)
+### Generar `.tar.gz`
 
 ```bash
 cd build-release
 cpack -G TGZ
 ```
-
-> **Nota**: el `.deb` y `.rpm` requieren que Qt6 esté instalado en el sistema destino.  
-> Para un binario portable (Qt incluido), considerá generar un **AppImage** con `linuxdeployqt`.
-
----
 
 ## 🤝 Contribuir
 

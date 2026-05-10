@@ -7,17 +7,15 @@
 #include <QSqlDatabase>
 #include <QVector>
 #include "linerecord.h"
-#include "schemadetector.h"
 
-struct Filter {
-    QString column;  // original column name (as displayed in UI)
-    enum Op { Contains, Equals, NotEquals, GreaterThan, LessThan } op;
-    QString value;
-    enum Logic { And, Or, Not } logic = And;
+enum class SortMode {
+    LineNumber,
+    Timestamp,
+};
 
-    Filter() : op(Contains), logic(And) {}
-    Filter(const QString& column, Op op, const QString& value, Logic logic = And)
-        : column(column), op(op), value(value), logic(logic) {}
+enum class SortOrder {
+    Ascending,
+    Descending,
 };
 
 class LogDatabase : public QObject
@@ -27,44 +25,23 @@ class LogDatabase : public QObject
 public:
     static LogDatabase& instance();
 
-    /// Create hybrid tables for the given file ID:
-    ///   - logs_meta_{id}: regular SQLite table with B-tree indexes on Number/Date columns.
-    ///   - logs_fts_{id}: FTS5 virtual table with raw + String/Date columns.
-    bool createTable(int fileId, const QVector<ColumnDef>& columns);
-
-    /// Drop both hybrid tables, freeing RAM immediately.
+    bool createTable(int fileId);
     bool dropTable(int fileId);
+    bool insertBatch(int fileId, const QVector<LineRecord>& records);
 
-    /// Insert a batch of records into both hybrid tables within a single transaction.
-    bool insertBatch(int fileId, const QVector<LineRecord>& records,
-                     const QVector<ColumnDef>& columns);
-
-    /// Get the column definitions for a file.
-    QVector<ColumnDef> getColumns(int fileId) const;
-
-    /// Query rows from a file's hybrid tables with optional FTS query and column filters.
-    /// Results are paginated with offset/limit.
     bool queryRows(int fileId, int offset, int limit,
-                   const QVector<Filter>& filters,
                    const QString& ftsQuery,
+                   qint64 fromTimestampMs,
+                   qint64 toTimestampMs,
+                   bool onlyWithTimestamp,
+                   SortMode sortMode,
+                   SortOrder sortOrder,
                    QVector<QVector<QString>>& outRows,
                    QStringList& outHeaders,
                    int& totalCount);
 
-    /// Search across ALL active tables (UNION ALL on meta tables).
-    bool searchAll(const QString& ftsQuery, const QVector<Filter>& filters,
-                   int offset, int limit,
-                   QVector<QVector<QString>>& outRows,
-                   QStringList& outHeaders,
-                   int& totalCount);
-
-    /// Get total row count in the meta table for a file.
     int rowCount(int fileId);
-
-    /// Returns the total size of the in-memory SQLite database in bytes.
     qint64 totalDbSizeBytes() const;
-
-    /// Get list of active file IDs.
     QSet<int> activeFileIds() const;
 
 private:
@@ -73,16 +50,13 @@ private:
     LogDatabase(const LogDatabase&) = delete;
     LogDatabase& operator=(const LogDatabase&) = delete;
 
-    // Table name helpers
     QString metaTableName(int fileId) const { return QString("logs_meta_%1").arg(fileId); }
-    QString ftsTableName(int fileId)  const { return QString("logs_fts_%1").arg(fileId);  }
-
-    // Resolve original column name -> sanitizedName for SQL use
-    QString sanitizedName(int fileId, const QString& originalName) const;
+    QString ftsTableName(int fileId)  const { return QString("logs_fts_%1").arg(fileId); }
+    QString buildOrderByClause(SortMode sortMode, SortOrder sortOrder) const;
 
     QSqlDatabase m_db;
     mutable QMutex m_mutex;
-    QMap<int, QVector<ColumnDef>> m_tableColumns;  // fileId -> columns
+    QSet<int> m_activeFileIds;
 };
 
 #endif // LOGDATABASE_H

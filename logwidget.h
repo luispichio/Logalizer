@@ -5,9 +5,8 @@
 #include <QTimer>
 #include <QVector>
 #include <QWidget>
-#include <QTextEdit>  // QTextEdit::ExtraSelection
+#include <QTextEdit>
 #include "logdatabase.h"
-#include "schemadetector.h"
 
 class FileWorker;
 class QTextBrowser;
@@ -16,22 +15,11 @@ class QProgressBar;
 class QLabel;
 class QCheckBox;
 class QComboBox;
+class QDateTimeEdit;
 class QVBoxLayout;
-class QHBoxLayout;
 class QScrollBar;
 class QSpinBox;
 class QPushButton;
-
-// A single row in the dynamic filter panel:
-// [Logic▼] [Column▼] [Operator▼] [Value          ] [×]
-struct FilterRow {
-    QComboBox* logicCombo  = nullptr;  // AND / OR / NOT
-    QComboBox* columnCombo = nullptr;  // column name (original)
-    QComboBox* opCombo     = nullptr;  // contains / = / != / > / <
-    QLineEdit* valueEdit   = nullptr;
-    QPushButton* removeBtn = nullptr;
-    QWidget* container     = nullptr;  // owning row widget
-};
 
 class LogWidget : public QWidget
 {
@@ -41,23 +29,20 @@ public:
     explicit LogWidget(const QString& filePath, int fileId, QWidget* parent = nullptr);
     ~LogWidget();
 
-    int     fileId()   const { return m_fileId; }
+    int fileId() const { return m_fileId; }
     QString filePath() const { return m_filePath; }
 
 signals:
     void loadingFinished(int fileId);
 
 private slots:
-    void onSchemaReady(int fileId, QVector<ColumnDef> columns);
     void onProgressUpdate(int fileId, qint64 bytesProcessed, qint64 totalBytes, qint32 linesProcessed);
     void onChunkInserted(int fileId, qint32 totalLinesInserted);
     void onFinished(int fileId);
     void onError(int fileId, QString message);
 
-    void onApplyFilters();   // resets p=0, forces full buffer fill
+    void onApplyFilters();
     void onWrapToggled(bool checked);
-
-    // ── Text find bar ────────────────────────────────────────────────
     void onToggleTextFindBar();
     void onTextFindSearch();
     void onTextFindNext();
@@ -71,89 +56,75 @@ protected:
 
 private:
     void setupUi();
-    void updateFilterColumns();
-    void addFilterRow(const QString& column = QString(), const QString& value = QString());
-    void removeFilterRow(QWidget* container);
-    void refreshData();                          // convenience: setPointer(p, force=true)
-    QVector<Filter> collectFilters() const;
+    void refreshData();
     void updateStatusLabel();
+    qint64 currentFromTimestampMs() const;
+    qint64 currentToTimestampMs() const;
+    bool onlyWithTimestamp() const;
+    SortMode currentSortMode() const;
+    SortOrder currentSortOrder() const;
+    void queryRows(int offset, int limit, QVector<QVector<QString>>& outRows, int& totalCount) const;
 
-    // ── Virtual scroll / buffer ──────────────────────────────────────
-    // The view always shows a sliding window of BUFFER rows from the DB.
-    // p = m_bufferPointer = absolute row offset of the first row in the buffer.
-    // Moving p by d: fetches only |d| new rows (delta), keeps the rest.
-    void setPointer(int p, bool force = false); // set p, update buffer & view
-    void fillBuffer();                          // full DB fetch at p
-    void updateBufferDelta(int delta);          // incremental fetch (±d rows)
-    void applyBufferToView();                   // push m_buffer → text view
-    void checkPrefetch();                       // extend buffer by PREFETCH_MARGIN if near edge
+    void setPointer(int p, bool force = false);
+    void fillBuffer();
+    void updateBufferDelta(int delta);
+    void applyBufferToView();
+    void checkPrefetch();
 
-    // ── Identity ─────────────────────────────────────────────────────
     QString m_filePath;
-    int     m_fileId;
+    int m_fileId;
 
-    // ── Worker thread ────────────────────────────────────────────────
-    QThread*    m_workerThread = nullptr;
-    FileWorker* m_worker       = nullptr;
+    QThread* m_workerThread = nullptr;
+    FileWorker* m_worker = nullptr;
 
-    // ── Schema & column metadata ─────────────────────────────────────
-    QVector<ColumnDef> m_columns;
-    QStringList        m_filterColumnNames;
-
-    // ── Ingestion debounce timer ─────────────────────────────────────
     QTimer* m_refreshTimer = nullptr;
     static constexpr int REFRESH_DEBOUNCE_MS = 1500;
 
-    // ── Main layout ──────────────────────────────────────────────────
     QVBoxLayout* m_mainLayout = nullptr;
 
-    // ── FTS5 search bar (top bar — filters rows in DB) ───────────────
-    QLineEdit*   m_searchEdit   = nullptr;
+    QLineEdit* m_searchEdit = nullptr;
     QPushButton* m_searchButton = nullptr;
+    QCheckBox* m_fromCheck = nullptr;
+    QDateTimeEdit* m_fromDateTimeEdit = nullptr;
+    QCheckBox* m_toCheck = nullptr;
+    QDateTimeEdit* m_toDateTimeEdit = nullptr;
+    QCheckBox* m_onlyTimestampedCheck = nullptr;
+    QComboBox* m_sortCombo = nullptr;
+    QComboBox* m_sortOrderCombo = nullptr;
 
-    // ── Text Find Bar (find in QTextBrowser) ─────────────────────────
-    QWidget*     m_textFindBar     = nullptr;
-    QComboBox*   m_textFindCombo   = nullptr;  // editable with history
-    QPushButton* m_textFindFirst   = nullptr;
-    QPushButton* m_textFindPrev    = nullptr;
-    QPushButton* m_textFindNext    = nullptr;
-    QPushButton* m_textFindLast    = nullptr;
-    QPushButton* m_textFindClear   = nullptr;
-    QCheckBox*   m_textFindRegex   = nullptr;
-    QCheckBox*   m_textFindCase    = nullptr;
-    QLabel*      m_textFindStatus  = nullptr;
-    // internal state
-    QStringList  m_textFindHistory;
+    QWidget* m_textFindBar = nullptr;
+    QComboBox* m_textFindCombo = nullptr;
+    QPushButton* m_textFindFirst = nullptr;
+    QPushButton* m_textFindPrev = nullptr;
+    QPushButton* m_textFindNext = nullptr;
+    QPushButton* m_textFindLast = nullptr;
+    QPushButton* m_textFindClear = nullptr;
+    QCheckBox* m_textFindRegex = nullptr;
+    QCheckBox* m_textFindCase = nullptr;
+    QLabel* m_textFindStatus = nullptr;
+    QStringList m_textFindHistory;
     QList<QTextEdit::ExtraSelection> m_textFindHighlights;
-    int          m_textFindCurrent = -1;       // index into m_textFindHighlights
+    int m_textFindCurrent = -1;
 
-    // ── Text view + custom scrollbar ─────────────────────────────────
-    QTextBrowser* m_textBrowser  = nullptr;
-    QCheckBox*    m_wrapCheck    = nullptr;
-    QScrollBar*   m_logScrollBar = nullptr;  // independent vertical scrollbar
+    QTextBrowser* m_textBrowser = nullptr;
+    QCheckBox* m_wrapCheck = nullptr;
+    QScrollBar* m_logScrollBar = nullptr;
 
-    // ── Filter panel ─────────────────────────────────────────────────
-    QVBoxLayout* m_filterLayout = nullptr;
-    QVector<FilterRow> m_filterRows;
+    QLabel* m_labelSize = nullptr;
+    QLabel* m_labelLines = nullptr;
+    QLabel* m_labelState = nullptr;
+    QProgressBar* m_progressBar = nullptr;
+    QSpinBox* m_bufferSizeSpin = nullptr;
 
-    // ── Status bar ───────────────────────────────────────────────────
-    QLabel*       m_labelSize    = nullptr;
-    QLabel*       m_labelLines   = nullptr;
-    QLabel*       m_labelState   = nullptr;
-    QProgressBar* m_progressBar  = nullptr;
-    QSpinBox*     m_bufferSizeSpin = nullptr;  // configurable N (buffer size)
+    static constexpr int DEFAULT_BUFFER = 5000;
+    static constexpr int PREFETCH_MARGIN = 1000;
+    int m_bufferPointer = 0;
+    int m_totalRowCount = 0;
+    QVector<QVector<QString>> m_buffer;
+    QStringList m_bufferHeaders;
 
-    // ── Virtual scroll state ─────────────────────────────────────────
-    static constexpr int DEFAULT_BUFFER  = 5000;
-    static constexpr int PREFETCH_MARGIN = 1000;  // rows to pre-load on each side
-    int           m_bufferPointer = 0;    // p: absolute DB offset of buffer start
-    int           m_totalRowCount = 0;    // total rows matching current filters
-    QVector<QVector<QString>> m_buffer;   // N-row sliding window
-    QStringList   m_bufferHeaders;        // column display names (stable post-schema)
-
-    // ── File metadata ────────────────────────────────────────────────
-    qint64  m_fileSize   = 0;
-    qint32  m_totalLines = 0;
+    qint64 m_fileSize = 0;
+    qint32 m_totalLines = 0;
 };
 
 #endif // LOGWIDGET_H
