@@ -70,7 +70,7 @@ void MainWindow::setupUi() {
 
     // ─── Status bar ──────────────────────────────────────────────────
     m_labelMemory = new QLabel("DB: 0 MB", this);
-    m_labelMemory->setToolTip("SQLite in-memory database size (page_count × page_size)");
+    m_labelMemory->setToolTip("SQLite in-memory database used/reserved pages");
     statusBar()->addPermanentWidget(m_labelMemory);
     statusBar()->showMessage("Ready");
 
@@ -82,13 +82,15 @@ void MainWindow::setupUi() {
 }
 
 void MainWindow::updateMemoryLabel() {
-    qint64 bytes = LogDatabase::instance().totalDbSizeBytes();
-    QString txt;
-    if (bytes < 1024 * 1024)
-        txt = QString("DB: %1 KB").arg(bytes / 1024);
-    else
-        txt = QString("DB: %1 MB").arg(bytes / 1024.0 / 1024.0, 0, 'f', 1);
-    m_labelMemory->setText(txt);
+    const qint64 usedBytes = LogDatabase::instance().totalDbUsedBytes();
+    const qint64 reservedBytes = LogDatabase::instance().totalDbSizeBytes();
+    auto formatBytes = [](qint64 bytes) {
+        if (bytes < 1024 * 1024) {
+            return QString("%1 KB").arg(bytes / 1024);
+        }
+        return QString("%1 MB").arg(bytes / 1024.0 / 1024.0, 0, 'f', 1);
+    };
+    m_labelMemory->setText(QString("DB: %1 used / %2 reserved").arg(formatBytes(usedBytes), formatBytes(reservedBytes)));
 }
 
 void MainWindow::onOpenFile() {

@@ -70,7 +70,7 @@ void FileWorker::doWork() {
         }
     }
 
-    if (!batch.isEmpty()) {
+    if (!m_stopRequested && !batch.isEmpty()) {
         LogDatabase::instance().insertBatch(m_fileId, batch);
         emit chunkInserted(m_fileId, lineNumber);
     }

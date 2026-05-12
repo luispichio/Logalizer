@@ -30,6 +30,7 @@ public:
                       int fromLineNumber,
                       bool backwards);
     int rowCount(int fileId);
+    qint64 totalDbUsedBytes() const;
     qint64 totalDbSizeBytes() const;
     QSet<int> activeFileIds() const;
 
@@ -40,6 +41,8 @@ private:
     LogDatabase& operator=(const LogDatabase&) = delete;
 
     QString tableName(int fileId) const { return QString("logs_%1").arg(fileId); }
+    bool openDatabase();
+    void resetDatabase();
 
     QSqlDatabase m_db;
     mutable QMutex m_mutex;

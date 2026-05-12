@@ -11,20 +11,35 @@ LogDatabase& LogDatabase::instance() {
 }
 
 LogDatabase::LogDatabase() {
+    openDatabase();
+}
+
+bool LogDatabase::openDatabase() {
     m_db = QSqlDatabase::addDatabase("QSQLITE", "logalizer_memdb");
     m_db.setDatabaseName(":memory:");
     if (!m_db.open()) {
         qCritical() << "LogDatabase: Failed to open in-memory database:"
                     << m_db.lastError().text();
+        return false;
     } else {
         qInfo() << "LogDatabase: In-memory SQLite opened.";
     }
+    return true;
 }
 
 LogDatabase::~LogDatabase() {
     if (m_db.isOpen()) {
         m_db.close();
     }
+}
+
+void LogDatabase::resetDatabase() {
+    if (m_db.isOpen()) {
+        m_db.close();
+    }
+    m_db = QSqlDatabase();
+    QSqlDatabase::removeDatabase("logalizer_memdb");
+    openDatabase();
 }
 
 bool LogDatabase::createTable(int fileId) {
@@ -48,17 +63,25 @@ bool LogDatabase::createTable(int fileId) {
 bool LogDatabase::dropTable(int fileId) {
     QMutexLocker locker(&m_mutex);
 
-    QSqlQuery q(m_db);
     bool ok = true;
 
-    if (!q.exec(QString("DROP TABLE IF EXISTS %1").arg(tableName(fileId)))) {
-        qCritical() << "LogDatabase::dropTable: fts drop failed:" << q.lastError().text();
-        ok = false;
+    {
+        QSqlQuery q(m_db);
+        if (!q.exec(QString("DROP TABLE IF EXISTS %1").arg(tableName(fileId)))) {
+            qCritical() << "LogDatabase::dropTable: fts drop failed:" << q.lastError().text();
+            ok = false;
+        }
     }
 
-    q.exec("PRAGMA shrink_memory");
-
     m_activeFileIds.remove(fileId);
+    if (m_activeFileIds.isEmpty()) {
+        resetDatabase();
+    } else {
+        QSqlQuery q(m_db);
+        if (!q.exec("PRAGMA shrink_memory")) {
+            qWarning() << "LogDatabase::dropTable: shrink_memory failed:" << q.lastError().text();
+        }
+    }
     qInfo() << "LogDatabase: Dropped table for fileId" << fileId;
     return ok;
 }
@@ -120,6 +143,24 @@ qint64 LogDatabase::totalDbSizeBytes() const {
         pageSize = q.value(0).toLongLong();
     }
     return pageCount * pageSize;
+}
+
+qint64 LogDatabase::totalDbUsedBytes() const {
+    QMutexLocker locker(&m_mutex);
+    QSqlQuery q(m_db);
+    qint64 pageCount = 0;
+    qint64 freeCount = 0;
+    qint64 pageSize = 4096;
+    if (q.exec("PRAGMA page_count") && q.next()) {
+        pageCount = q.value(0).toLongLong();
+    }
+    if (q.exec("PRAGMA freelist_count") && q.next()) {
+        freeCount = q.value(0).toLongLong();
+    }
+    if (q.exec("PRAGMA page_size") && q.next()) {
+        pageSize = q.value(0).toLongLong();
+    }
+    return qMax<qint64>(0, pageCount - freeCount) * pageSize;
 }
 
 QSet<int> LogDatabase::activeFileIds() const {
