@@ -64,6 +64,7 @@ private:
     SortMode currentSortMode() const;
     SortOrder currentSortOrder() const;
     void queryRows(int offset, int limit, QVector<QVector<QString>>& outRows, int& totalCount) const;
+    QString buildRowHtml(const QVector<QString>& row) const;
 
     void setPointer(int p, bool force = false);
     void fillBuffer();
@@ -108,6 +109,8 @@ private:
 
     QTextBrowser* m_textBrowser = nullptr;
     QCheckBox* m_wrapCheck = nullptr;
+    QCheckBox* m_showLineNumberCheck = nullptr;
+    QCheckBox* m_showTimestampCheck = nullptr;
     QScrollBar* m_logScrollBar = nullptr;
 
     QLabel* m_labelSize = nullptr;

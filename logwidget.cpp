@@ -82,9 +82,19 @@ void LogWidget::setupUi() {
         m_wrapCheck = new QCheckBox("Wrap", this);
         m_wrapCheck->setToolTip("Toggle word wrap in text view");
         toolBar->addWidget(m_wrapCheck);
+        m_showLineNumberCheck = new QCheckBox("Line #", this);
+        m_showLineNumberCheck->setToolTip("Show the line number prefix in the text view");
+        m_showLineNumberCheck->setChecked(true);
+        toolBar->addWidget(m_showLineNumberCheck);
+        m_showTimestampCheck = new QCheckBox("Timestamp", this);
+        m_showTimestampCheck->setToolTip("Show the detected timestamp prefix in the text view");
+        m_showTimestampCheck->setChecked(true);
+        toolBar->addWidget(m_showTimestampCheck);
         toolBar->addStretch();
         m_mainLayout->addLayout(toolBar);
         connect(m_wrapCheck, &QCheckBox::toggled, this, &LogWidget::onWrapToggled);
+        connect(m_showLineNumberCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); });
+        connect(m_showTimestampCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); });
     }
 
     auto* splitter = new QSplitter(Qt::Horizontal, this);
@@ -578,26 +588,57 @@ void LogWidget::updateBufferDelta(int delta) {
 }
 
 void LogWidget::applyBufferToView() {
-    int rawIdx = m_bufferHeaders.indexOf("raw");
-    if (rawIdx < 0) {
-        rawIdx = qMin(1, m_bufferHeaders.size() - 1);
-    }
-
-    QString text;
-    text.reserve(m_buffer.size() * 200);
+    QString html;
+    html.reserve(m_buffer.size() * 320);
+    html += "<html><body style=\"margin:0; font-family:'Monospace'; font-size:9pt;\">";
+    html += QString("<div style=\"white-space:%1;\">")
+                .arg(m_wrapCheck && m_wrapCheck->isChecked() ? "pre-wrap" : "pre");
     for (const auto& row : m_buffer) {
-        if (rawIdx >= 0 && rawIdx < row.size()) {
-            text += row[rawIdx] + "\n";
-        }
+        html += buildRowHtml(row);
     }
+    html += "</div></body></html>";
 
-    m_textBrowser->setPlainText(text);
+    m_textBrowser->setHtml(html);
 
     if (m_textFindBar && m_textFindBar->isVisible() && m_textFindCombo && !m_textFindCombo->currentText().isEmpty()) {
         onTextFindSearch();
     } else {
         onTextFindClear();
     }
+}
+
+QString LogWidget::buildRowHtml(const QVector<QString>& row) const {
+    const int lineNumberIdx = m_bufferHeaders.indexOf("line_number");
+    const int rawIdx = m_bufferHeaders.indexOf("raw");
+    const int timestampIdx = m_bufferHeaders.indexOf("timestamp_text");
+
+    QStringList parts;
+    if (m_showLineNumberCheck && m_showLineNumberCheck->isChecked() && lineNumberIdx >= 0 && lineNumberIdx < row.size()) {
+        bool ok = false;
+        const int lineNumber = row[lineNumberIdx].toInt(&ok);
+        const QString displayNumber = ok
+            ? QString::number(lineNumber + 1).rightJustified(6, '0')
+            : row[lineNumberIdx].rightJustified(6, '0');
+        parts << QString("<span style=\"color:#7f8fa6; font-weight:600;\">%1</span>")
+                     .arg(displayNumber.toHtmlEscaped());
+    }
+
+    if (m_showTimestampCheck && m_showTimestampCheck->isChecked() && timestampIdx >= 0 && timestampIdx < row.size()) {
+        const QString timestamp = row[timestampIdx].trimmed();
+        if (!timestamp.isEmpty()) {
+            parts << QString("<span style=\"color:#2aa198; font-style:italic;\">%1</span>")
+                         .arg(timestamp.toHtmlEscaped());
+        }
+    }
+
+    QString prefix;
+    if (!parts.isEmpty()) {
+        prefix = parts.join(" <span style=\"color:#586e75;\">|</span> ");
+        prefix += " <span style=\"color:#586e75;\">|</span> ";
+    }
+
+    const QString raw = (rawIdx >= 0 && rawIdx < row.size()) ? row[rawIdx].toHtmlEscaped() : QString();
+    return prefix + raw + "\n";
 }
 
 void LogWidget::updateStatusLabel() {
