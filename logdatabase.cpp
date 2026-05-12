@@ -1,5 +1,6 @@
 #include "logdatabase.h"
 
+#include <QVariant>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QtLogging>
@@ -29,37 +30,10 @@ LogDatabase::~LogDatabase() {
 bool LogDatabase::createTable(int fileId) {
     QMutexLocker locker(&m_mutex);
 
-    QString metaT = metaTableName(fileId);
-    QString ftsT = ftsTableName(fileId);
+    QString table = tableName(fileId);
     QSqlQuery q(m_db);
 
-    QString createMeta = QString(
-        "CREATE TABLE IF NOT EXISTS %1 ("
-        "line_number INTEGER PRIMARY KEY, "
-        "file_position INTEGER NOT NULL, "
-        "raw TEXT NOT NULL, "
-        "timestamp_text TEXT, "
-        "timestamp_unix_ms INTEGER, "
-        "timestamp_source TEXT)"
-    ).arg(metaT);
-
-    if (!q.exec(createMeta)) {
-        qCritical() << "LogDatabase::createTable: meta failed:" << q.lastError().text()
-                    << "\nSQL:" << createMeta;
-        return false;
-    }
-
-    const QStringList indexSqls = {
-        QString("CREATE INDEX IF NOT EXISTS idx_meta_%1_fp ON %2(file_position)").arg(fileId).arg(metaT),
-        QString("CREATE INDEX IF NOT EXISTS idx_meta_%1_ts ON %2(timestamp_unix_ms)").arg(fileId).arg(metaT),
-    };
-    for (const QString& idxSql : indexSqls) {
-        if (!q.exec(idxSql)) {
-            qWarning() << "LogDatabase::createTable: index warning:" << q.lastError().text();
-        }
-    }
-
-    QString createFts = QString("CREATE VIRTUAL TABLE IF NOT EXISTS %1 USING fts5(raw)").arg(ftsT);
+    QString createFts = QString("CREATE VIRTUAL TABLE IF NOT EXISTS %1 USING fts5(file_position UNINDEXED, raw)").arg(table);
     if (!q.exec(createFts)) {
         qCritical() << "LogDatabase::createTable: FTS5 failed:" << q.lastError().text()
                     << "\nSQL:" << createFts;
@@ -67,7 +41,7 @@ bool LogDatabase::createTable(int fileId) {
     }
 
     m_activeFileIds.insert(fileId);
-    qInfo() << "LogDatabase: Created fixed tables for fileId" << fileId;
+    qInfo() << "LogDatabase: Created FTS table for fileId" << fileId;
     return true;
 }
 
@@ -77,11 +51,7 @@ bool LogDatabase::dropTable(int fileId) {
     QSqlQuery q(m_db);
     bool ok = true;
 
-    if (!q.exec(QString("DROP TABLE IF EXISTS %1").arg(metaTableName(fileId)))) {
-        qCritical() << "LogDatabase::dropTable: meta drop failed:" << q.lastError().text();
-        ok = false;
-    }
-    if (!q.exec(QString("DROP TABLE IF EXISTS %1").arg(ftsTableName(fileId)))) {
+    if (!q.exec(QString("DROP TABLE IF EXISTS %1").arg(tableName(fileId)))) {
         qCritical() << "LogDatabase::dropTable: fts drop failed:" << q.lastError().text();
         ok = false;
     }
@@ -89,7 +59,7 @@ bool LogDatabase::dropTable(int fileId) {
     q.exec("PRAGMA shrink_memory");
 
     m_activeFileIds.remove(fileId);
-    qInfo() << "LogDatabase: Dropped tables for fileId" << fileId;
+    qInfo() << "LogDatabase: Dropped table for fileId" << fileId;
     return ok;
 }
 
@@ -100,16 +70,7 @@ bool LogDatabase::insertBatch(int fileId, const QVector<LineRecord>& records) {
         return true;
     }
 
-    QString metaT = metaTableName(fileId);
-    QString ftsT = ftsTableName(fileId);
-
-    QString metaSql = QString(
-        "INSERT OR IGNORE INTO %1 "
-        "(line_number, file_position, raw, timestamp_text, timestamp_unix_ms, timestamp_source) "
-        "VALUES (?, ?, ?, ?, ?, ?)"
-    ).arg(metaT);
-
-    QString ftsSql = QString("INSERT INTO %1 (rowid, raw) VALUES (?, ?)").arg(ftsT);
+    QString sql = QString("INSERT OR IGNORE INTO %1 (rowid, file_position, raw) VALUES (?, ?, ?)").arg(tableName(fileId));
 
     if (!m_db.transaction()) {
         qCritical() << "LogDatabase::insertBatch: transaction start failed:"
@@ -117,26 +78,15 @@ bool LogDatabase::insertBatch(int fileId, const QVector<LineRecord>& records) {
         return false;
     }
 
-    QSqlQuery metaQ(m_db);
-    QSqlQuery ftsQ(m_db);
-    metaQ.prepare(metaSql);
-    ftsQ.prepare(ftsSql);
+    QSqlQuery insertQ(m_db);
+    insertQ.prepare(sql);
 
     for (const LineRecord& rec : records) {
-        metaQ.addBindValue(rec.lineNumber);
-        metaQ.addBindValue(rec.filePosition);
-        metaQ.addBindValue(rec.raw);
-        metaQ.addBindValue(rec.timestampText);
-        metaQ.addBindValue(rec.timestampUnixMs >= 0 ? QVariant(rec.timestampUnixMs) : QVariant());
-        metaQ.addBindValue(rec.timestampSource);
-        if (!metaQ.exec()) {
-            qWarning() << "LogDatabase: meta insert failed:" << metaQ.lastError().text();
-        }
-
-        ftsQ.addBindValue(rec.lineNumber);
-        ftsQ.addBindValue(rec.raw);
-        if (!ftsQ.exec()) {
-            qWarning() << "LogDatabase: fts insert failed:" << ftsQ.lastError().text();
+        insertQ.bindValue(0, rec.lineNumber + 1);
+        insertQ.bindValue(1, rec.filePosition);
+        insertQ.bindValue(2, rec.raw);
+        if (!insertQ.exec()) {
+            qWarning() << "LogDatabase: fts insert failed:" << insertQ.lastError().text();
         }
     }
 
@@ -152,7 +102,7 @@ bool LogDatabase::insertBatch(int fileId, const QVector<LineRecord>& records) {
 int LogDatabase::rowCount(int fileId) {
     QMutexLocker locker(&m_mutex);
     QSqlQuery q(m_db);
-    if (q.exec(QString("SELECT COUNT(*) FROM %1").arg(metaTableName(fileId))) && q.next()) {
+    if (q.exec(QString("SELECT COUNT(*) FROM %1").arg(tableName(fileId))) && q.next()) {
         return q.value(0).toInt();
     }
     return 0;
@@ -177,91 +127,36 @@ QSet<int> LogDatabase::activeFileIds() const {
     return m_activeFileIds;
 }
 
-QString LogDatabase::buildOrderByClause(SortMode sortMode, SortOrder sortOrder) const {
-    if (sortMode == SortMode::Timestamp) {
-        if (sortOrder == SortOrder::Descending) {
-            return "ORDER BY m.timestamp_unix_ms IS NULL, m.timestamp_unix_ms DESC, m.line_number DESC";
-        }
-        return "ORDER BY m.timestamp_unix_ms IS NULL, m.timestamp_unix_ms ASC, m.line_number ASC";
-    }
-
-    if (sortOrder == SortOrder::Descending) {
-        return "ORDER BY m.line_number DESC";
-    }
-    return "ORDER BY m.line_number ASC";
-}
-
-bool LogDatabase::queryRows(int fileId, int offset, int limit,
-                            const QString& ftsQuery,
-                            qint64 fromTimestampMs,
-                            qint64 toTimestampMs,
-                            bool onlyWithTimestamp,
-                            SortMode sortMode,
-                            SortOrder sortOrder,
+bool LogDatabase::queryRows(int fileId, int firstLineNumber, int limit,
+                            const QString& ftsFilter,
                             QVector<QVector<QString>>& outRows,
-                            QStringList& outHeaders,
-                            int& totalCount) {
+                            QStringList& outHeaders) {
     QMutexLocker locker(&m_mutex);
 
     outRows.clear();
-    outHeaders = {"line_number", "raw", "timestamp_text", "timestamp_source"};
+    outHeaders = {"line_number", "file_position", "raw"};
 
-    QString metaT = metaTableName(fileId);
-    QString ftsT = ftsTableName(fileId);
-    const bool needsFts = !ftsQuery.trimmed().isEmpty();
+    QString table = tableName(fileId);
+    const QString filter = ftsFilter.trimmed();
+    const bool hasFilter = !filter.isEmpty();
 
-    QString fromClause = needsFts
-        ? QString("FROM %1 m INNER JOIN %2 f ON f.rowid = m.line_number").arg(metaT, ftsT)
-        : QString("FROM %1 m").arg(metaT);
-
-    QStringList conditions;
-    QList<QVariant> bindValues;
-
-    if (needsFts) {
-        conditions << QString("%1 MATCH ?").arg(ftsT);
-        bindValues << ftsQuery;
-    }
-    if (onlyWithTimestamp || fromTimestampMs >= 0 || toTimestampMs >= 0) {
-        conditions << "m.timestamp_unix_ms IS NOT NULL";
-    }
-    if (fromTimestampMs >= 0) {
-        conditions << "m.timestamp_unix_ms >= ?";
-        bindValues << fromTimestampMs;
-    }
-    if (toTimestampMs >= 0) {
-        conditions << "m.timestamp_unix_ms <= ?";
-        bindValues << toTimestampMs;
-    }
-
-    QString whereClause = conditions.isEmpty() ? QString() : "WHERE " + conditions.join(" AND ");
-
-    {
-        QString countSql = QString("SELECT COUNT(*) %1 %2").arg(fromClause, whereClause);
-        QSqlQuery cq(m_db);
-        cq.prepare(countSql);
-        for (const QVariant& value : bindValues) {
-            cq.addBindValue(value);
-        }
-        if (cq.exec() && cq.next()) {
-            totalCount = cq.value(0).toInt();
-        } else {
-            totalCount = 0;
-            qWarning() << "LogDatabase::queryRows: count failed:" << cq.lastError().text()
-                       << "\nSQL:" << countSql;
-        }
-    }
-
-    QString sql = QString(
-        "SELECT m.line_number, m.raw, m.timestamp_text, m.timestamp_source %1 %2 %3 LIMIT ? OFFSET ?"
-    ).arg(fromClause, whereClause, buildOrderByClause(sortMode, sortOrder));
+    QString sql = hasFilter
+        ? QString(
+              "SELECT rowid - 1 AS line_number, file_position, raw FROM %1 "
+              "WHERE %1 MATCH ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?"
+          ).arg(table)
+        : QString(
+              "SELECT rowid - 1 AS line_number, file_position, raw FROM %1 "
+              "WHERE rowid >= ? ORDER BY rowid ASC LIMIT ?"
+          ).arg(table);
 
     QSqlQuery q(m_db);
     q.prepare(sql);
-    for (const QVariant& value : bindValues) {
-        q.addBindValue(value);
+    if (hasFilter) {
+        q.addBindValue(filter);
     }
+    q.addBindValue(qMax(1, firstLineNumber + 1));
     q.addBindValue(limit);
-    q.addBindValue(offset);
 
     if (!q.exec()) {
         qWarning() << "LogDatabase::queryRows: failed:" << q.lastError().text()
@@ -279,4 +174,44 @@ bool LogDatabase::queryRows(int fileId, int offset, int limit,
     }
 
     return true;
+}
+
+int LogDatabase::findMatchLine(int fileId,
+                               const QString& ftsFilter,
+                               const QString& ftsQuery,
+                               int fromLineNumber,
+                               bool backwards) {
+    QMutexLocker locker(&m_mutex);
+
+    const QString filter = ftsFilter.trimmed();
+    const QString queryText = ftsQuery.trimmed();
+    if (queryText.isEmpty()) {
+        return -1;
+    }
+
+    const QString matchQuery = filter.isEmpty()
+        ? queryText
+        : QString("(%1) AND (%2)").arg(filter, queryText);
+
+    const QString table = tableName(fileId);
+    const QString sql = backwards
+        ? QString("SELECT rowid - 1 FROM %1 WHERE %1 MATCH ? AND rowid <= ? ORDER BY rowid DESC LIMIT 1").arg(table)
+        : QString("SELECT rowid - 1 FROM %1 WHERE %1 MATCH ? AND rowid >= ? ORDER BY rowid ASC LIMIT 1").arg(table);
+
+    QSqlQuery q(m_db);
+    q.prepare(sql);
+    q.addBindValue(matchQuery);
+    q.addBindValue(qMax(1, fromLineNumber + 1));
+
+    if (!q.exec()) {
+        qWarning() << "LogDatabase::findMatchLine: failed:" << q.lastError().text()
+                   << "\nSQL:" << sql;
+        return -1;
+    }
+
+    if (!q.next()) {
+        return -1;
+    }
+
+    return q.value(0).toInt();
 }

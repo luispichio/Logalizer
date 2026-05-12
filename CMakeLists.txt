@@ -128,8 +128,8 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "High-performance JSON Lines log analyzer — desktop alternative to lnav")
 set(CPACK_PACKAGE_DESCRIPTION
     "Logalizer is a desktop application for analysing JSONL log files.\n"
-    "It uses an in-memory SQLite FTS5 index plus fixed timestamp metadata\n"
-    "for fast text search and time-range filtering without configuration.")
+    "It uses one in-memory SQLite FTS5 table per file for fast text search\n"
+    "and pointer-based row navigation without configuration.")
 set(CPACK_RESOURCE_FILE_LICENSE     "${CMAKE_SOURCE_DIR}/LICENSE")
 
 # .deb (Debian / Ubuntu)

@@ -1,16 +1,15 @@
 # Logalizer
 
-Logalizer es una aplicación de escritorio para analizar archivos de logs con foco en dos tareas: buscar texto rápido y recortar por tiempo sin configuración previa. Está construida con **C++17**, **Qt6** y **SQLite + FTS5** en memoria.
+Logalizer es una aplicación de escritorio para analizar archivos de logs con foco en abrir archivos grandes, navegar por líneas y buscar texto rápido. Está construida con **C++17**, **Qt6** y **SQLite + FTS5** en memoria.
 
 ## 🚀 Características Principales
 
-- **Búsqueda Full-Text con FTS5**: cada archivo abierto crea un índice FTS5 sobre `raw` para búsquedas rápidas sin full-scan en la mayoría de los casos.
-- **Metadatos temporales fijos**: además del índice de texto, cada línea guarda `line_number`, `file_position` y un timestamp detectado opcional para filtrar por rango temporal y ordenar por fecha.
-- **Detección automática de timestamp**: prioriza campos JSON comunes como `@timestamp`, `timestamp`, `time` o `datetime`; si no encuentra uno, intenta detectar fechas directamente en el texto crudo.
+- **Búsqueda Full-Text con FTS5**: cada archivo abierto crea una única tabla FTS5 sobre `raw` para búsquedas rápidas.
+- **Navegación por línea**: `rowid` representa el número de línea y permite mover el visor por puntero sin usar paginación por offset.
+- **Offset de archivo disponible**: cada línea conserva `file_position` como dato no indexado para usos posteriores.
 - **Multihilo y UI fluida**: la ingesta ocurre en un `QThread` con inserts por lotes y refresco con debounce para no bloquear la interfaz.
-- **Vista de texto enfocada**: el contenido se muestra en `QTextBrowser`, con wrap configurable y búsqueda dentro del buffer visible (`Ctrl+F`, `F3`, `Shift+F3`).
-- **Filtro temporal simple**: permite combinar búsqueda FTS con rango `From/To`, opción `Only with timestamp` y orden por línea o por timestamp.
-- **Aislamiento por pestaña**: cada archivo vive en sus propias tablas in-memory y al cerrar la pestaña se liberan inmediatamente.
+- **Vista de texto enfocada**: el contenido se muestra en `QTextBrowser`, con wrap configurable, búsqueda FTS5 global y búsqueda local dentro del buffer visible (`Ctrl+F`, `F3`, `Shift+F3`).
+- **Aislamiento por pestaña**: cada archivo vive en su propia tabla in-memory y al cerrar la pestaña se libera inmediatamente.
 
 ## 🛠️ Stack Tecnológico
 
@@ -25,9 +24,9 @@ Logalizer es una aplicación de escritorio para analizar archivos de logs con fo
 |:---:|---|---|
 | ⏳ | **Resaltado de Búsqueda** | Integrar snippets o resaltado alineado a resultados FTS5. |
 | ⏳ | **Exportación de Resultados** | Exportar las filas filtradas/buscadas a JSONL o CSV. |
-| ⏳ | **Tests Unitarios** | Cobertura sobre detección de timestamps y consultas en `LogDatabase`. |
-| ⏳ | **Guardar/Cargar Workspaces** | Guardar sesiones: archivos abiertos y filtros temporales activos. |
-| ⏳ | **Gráficos de Frecuencia** | Mini-histograma de volumen de logs en función del tiempo detectado. |
+| ⏳ | **Tests Unitarios** | Cobertura sobre consultas FTS5 y navegación en `LogDatabase`. |
+| ⏳ | **Guardar/Cargar Workspaces** | Guardar sesiones: archivos abiertos y posición de navegación. |
+| ⏳ | **Exportar Rangos** | Exportar rangos de líneas o resultados de búsqueda a JSONL o CSV. |
 | ⏳ | **Parser Genérico de Texto** | Soporte para logs no-JSON mediante expresiones regulares. |
 | ⏳ | **Cliente SFTP** | Conectarse a servidores remotos y descargar logs directamente. |
 | ⏳ | **Archivos comprimidos (.zip, .gz)** | Soporte para apertura de archivos comprimidos. |

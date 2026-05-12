@@ -2,9 +2,6 @@
 #define FILEWORKER_H
 
 #include <QObject>
-#include <QDateTime>
-#include <QJsonObject>
-#include <QRegularExpression>
 #include <QVector>
 #include <atomic>
 #include "linerecord.h"
@@ -30,22 +27,12 @@ signals:
 
 private:
     void doWork();
-    LineRecord parseLine(const QString& line, qint64 offset, qint32 lineNum) const;
-    bool extractTimestampFromJson(const QJsonObject& obj,
-                                  QString& timestampText,
-                                  qint64& timestampUnixMs,
-                                  QString& timestampSource) const;
-    bool extractTimestampFromRaw(const QString& line,
-                                 QString& timestampText,
-                                 qint64& timestampUnixMs,
-                                 QString& timestampSource) const;
-    bool tryParseTimestampText(const QString& input, QString& normalizedText, qint64& unixMs) const;
 
     QString m_fileName;
     int m_fileId;
     std::atomic<bool> m_stopRequested{false};
 
-    static constexpr int CHUNK_SIZE = 5000;
+    static constexpr int CHUNK_SIZE = 10000;
 };
 
 #endif // FILEWORKER_H

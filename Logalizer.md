@@ -5,7 +5,7 @@ Este archivo `Logalizer.md` es la fuente de verdad del proyecto.
 ## 1. Visión General y Objetivos
 
 - **Descripción**: Aplicación de escritorio para análisis de logs de alto rendimiento.
-- **Objetivo principal**: abrir logs grandes, buscar texto rápido y navegar resultados por tiempo sin configuración previa.
+- **Objetivo principal**: abrir logs grandes, buscar texto rápido y navegar por líneas sin configuración previa.
 - **Plataforma**: Desktop (Linux, Windows).
 - **Repositorio**: https://github.com/luispichio/Logalizer
 
@@ -19,33 +19,21 @@ Este archivo `Logalizer.md` es la fuente de verdad del proyecto.
   - `raw`
   - `file_position`
   - `line_number`
-  - `timestamp_text` opcional
-  - `timestamp_unix_ms` opcional
-  - `timestamp_source` opcional
-- La detección de timestamp sigue esta prioridad:
-  - campos JSON comunes: `@timestamp`, `timestamp`, `time`, `ts`, `datetime`, `date`
-  - cualquier string JSON que parezca fecha
-  - regex sobre la línea cruda
 
 ### 2.2 Base de Datos
 
-Por cada archivo abierto se crean dos tablas in-memory:
+Por cada archivo abierto se crea una tabla FTS5 in-memory:
 
 | Tabla | Tipo SQLite | Contenido | Propósito |
 |---|---|---|---|
-| `logs_meta_{id}` | Tabla regular | `line_number`, `file_position`, `raw`, `timestamp_text`, `timestamp_unix_ms`, `timestamp_source` | navegación, filtro temporal, orden |
-| `logs_fts_{id}` | Virtual FTS5 | `raw` | full-text search |
+| `logs_{id}` | Virtual FTS5 | `file_position UNINDEXED`, `raw` | navegación y full-text search |
 
-- Índices B-tree en `logs_meta_{id}`:
-  - `file_position`
-  - `timestamp_unix_ms`
-- JOIN por `rowid`:
-  - `logs_fts_{id}.rowid = logs_meta_{id}.line_number`
+- `rowid = line_number + 1`.
+- `file_position` se guarda como columna `UNINDEXED`.
 - Estrategia de consulta:
-  - FTS → `MATCH` sobre `logs_fts_{id}`
-  - rango temporal → filtro sobre `timestamp_unix_ms`
-  - orden → por `line_number` o `timestamp_unix_ms`
-- Al cerrar un archivo se hace `DROP TABLE` sobre meta y FTS para liberar RAM.
+  - navegación → `WHERE rowid >= ? ORDER BY rowid LIMIT ?`
+  - búsqueda → `MATCH` sobre `logs_{id}` y posicionamiento en el primer `rowid` coincidente
+- Al cerrar un archivo se hace `DROP TABLE` para liberar RAM.
 
 ### 2.3 UI
 
@@ -56,13 +44,8 @@ Por cada archivo abierto se crean dos tablas in-memory:
   - `Shift+F3`
   - regex opcional
   - case-sensitive opcional
-- Filtros globales simples:
-  - búsqueda FTS
-  - `From`
-  - `To`
-  - `Only with timestamp`
-  - orden por línea o timestamp
-- Paginación mediante buffer deslizante configurable.
+- Búsqueda FTS5 global sobre todo el archivo.
+- Navegación por puntero: la vista carga solo las filas necesarias para llenar el visor.
 
 ### 2.4 Rendimiento
 

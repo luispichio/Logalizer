@@ -8,16 +8,6 @@
 #include <QVector>
 #include "linerecord.h"
 
-enum class SortMode {
-    LineNumber,
-    Timestamp,
-};
-
-enum class SortOrder {
-    Ascending,
-    Descending,
-};
-
 class LogDatabase : public QObject
 {
     Q_OBJECT
@@ -29,17 +19,16 @@ public:
     bool dropTable(int fileId);
     bool insertBatch(int fileId, const QVector<LineRecord>& records);
 
-    bool queryRows(int fileId, int offset, int limit,
-                   const QString& ftsQuery,
-                   qint64 fromTimestampMs,
-                   qint64 toTimestampMs,
-                   bool onlyWithTimestamp,
-                   SortMode sortMode,
-                   SortOrder sortOrder,
+    bool queryRows(int fileId, int firstLineNumber, int limit,
+                   const QString& ftsFilter,
                    QVector<QVector<QString>>& outRows,
-                   QStringList& outHeaders,
-                   int& totalCount);
+                   QStringList& outHeaders);
 
+    int findMatchLine(int fileId,
+                      const QString& ftsFilter,
+                      const QString& ftsQuery,
+                      int fromLineNumber,
+                      bool backwards);
     int rowCount(int fileId);
     qint64 totalDbSizeBytes() const;
     QSet<int> activeFileIds() const;
@@ -50,9 +39,7 @@ private:
     LogDatabase(const LogDatabase&) = delete;
     LogDatabase& operator=(const LogDatabase&) = delete;
 
-    QString metaTableName(int fileId) const { return QString("logs_meta_%1").arg(fileId); }
-    QString ftsTableName(int fileId)  const { return QString("logs_fts_%1").arg(fileId); }
-    QString buildOrderByClause(SortMode sortMode, SortOrder sortOrder) const;
+    QString tableName(int fileId) const { return QString("logs_%1").arg(fileId); }
 
     QSqlDatabase m_db;
     mutable QMutex m_mutex;

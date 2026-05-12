@@ -8,8 +8,8 @@ Logalizer es una aplicación de escritorio para análisis de logs con foco en:
 
 - abrir archivos grandes rápido
 - buscar texto con FTS5
-- detectar timestamps automáticamente
-- filtrar y ordenar por tiempo sin configuración previa
+- navegar por líneas usando un puntero de primera fila visible
+- mantener una tabla FTS5 in-memory por archivo
 
 Repositorio: https://github.com/luispichio/Logalizer
 
@@ -49,18 +49,11 @@ MainWindow
         └── LogWidget (1 por archivo)
               ├── FileWorker (QThread)
               │     └── ingesta en chunks de 5.000 líneas
-              │           ├── parsea JSON si aplica
-              │           ├── detecta timestamp
-              │           └── inserta meta + FTS5
+              │           └── inserta filas en FTS5
               └── LogDatabase (singleton)
-                    ├── logs_meta_{id}
-                    │     ├── line_number
-                    │     ├── file_position
-                    │     ├── raw
-                    │     ├── timestamp_text
-                    │     ├── timestamp_unix_ms
-                    │     └── timestamp_source
-                    └── logs_fts_{id}
+                    └── logs_{id}
+                          ├── rowid = line_number + 1
+                          ├── file_position UNINDEXED
                           └── raw
 ```
 
@@ -72,40 +65,17 @@ MainWindow
 - La UI se construye siempre en C++ programático.
 - Cada `LogWidget` es autónomo: al destruirse detiene su worker y hace `DROP TABLE`.
 
-## 🕒 Detección de Timestamp
-
-Prioridad de detección:
-
-1. Campos JSON conocidos:
-   - `@timestamp`
-   - `timestamp`
-   - `time`
-   - `ts`
-   - `datetime`
-   - `date`
-2. Cualquier string JSON que parezca fecha.
-3. Regex sobre la línea cruda.
-
-Persistencia por línea:
+## 🧾 Persistencia por Línea
 
 - `raw`
 - `file_position`
 - `line_number`
-- `timestamp_text` opcional
-- `timestamp_unix_ms` opcional
-- `timestamp_source` opcional
 
 ## 🧱 UI Actual
 
 - Vista única de texto en `QTextBrowser`.
-- Búsqueda full-text FTS5.
-- Filtros temporales simples:
-  - `From`
-  - `To`
-  - `Only with timestamp`
-- Orden por:
-  - `line_number`
-  - `timestamp_unix_ms`
+- Búsqueda full-text FTS5 global sobre todo el archivo.
+- Navegación por puntero: el visor carga solo las filas necesarias para llenar el viewport.
 - Búsqueda local dentro del buffer visible con `Ctrl+F`, `F3`, `Shift+F3`.
 
 ## ✅ Instrucciones para la IA
@@ -129,7 +99,7 @@ Persistencia por línea:
 ## 📌 Roadmap Prioritario
 
 1. Resaltado de resultados FTS en el visor de texto.
-2. Tests unitarios para detección de timestamps y `LogDatabase`.
+2. Tests unitarios para navegación FTS5 y `LogDatabase`.
 3. Exportación de resultados a JSONL o CSV.
 4. Soporte de `.gz` y `.zip`.
 5. Workspaces o sesiones persistentes.

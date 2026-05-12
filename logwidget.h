@@ -5,7 +5,6 @@
 #include <QTimer>
 #include <QVector>
 #include <QWidget>
-#include <QTextEdit>
 #include "logdatabase.h"
 
 class FileWorker;
@@ -15,10 +14,8 @@ class QProgressBar;
 class QLabel;
 class QCheckBox;
 class QComboBox;
-class QDateTimeEdit;
 class QVBoxLayout;
 class QScrollBar;
-class QSpinBox;
 class QPushButton;
 
 class LogWidget : public QWidget
@@ -58,19 +55,14 @@ private:
     void setupUi();
     void refreshData();
     void updateStatusLabel();
-    qint64 currentFromTimestampMs() const;
-    qint64 currentToTimestampMs() const;
-    bool onlyWithTimestamp() const;
-    SortMode currentSortMode() const;
-    SortOrder currentSortOrder() const;
-    void queryRows(int offset, int limit, QVector<QVector<QString>>& outRows, int& totalCount) const;
     QString buildRowHtml(const QVector<QString>& row) const;
+    int visibleRowCount() const;
+    void updateScrollBar();
+    void jumpToMatch(int fromLineNumber, bool backwards, const QString& notFoundText);
 
     void setPointer(int p, bool force = false);
     void fillBuffer();
-    void updateBufferDelta(int delta);
     void applyBufferToView();
-    void checkPrefetch();
 
     QString m_filePath;
     int m_fileId;
@@ -85,13 +77,8 @@ private:
 
     QLineEdit* m_searchEdit = nullptr;
     QPushButton* m_searchButton = nullptr;
-    QCheckBox* m_fromCheck = nullptr;
-    QDateTimeEdit* m_fromDateTimeEdit = nullptr;
-    QCheckBox* m_toCheck = nullptr;
-    QDateTimeEdit* m_toDateTimeEdit = nullptr;
-    QCheckBox* m_onlyTimestampedCheck = nullptr;
-    QComboBox* m_sortCombo = nullptr;
-    QComboBox* m_sortOrderCombo = nullptr;
+    QLabel* m_searchStatus = nullptr;
+    QString m_ftsFilter;
 
     QWidget* m_textFindBar = nullptr;
     QComboBox* m_textFindCombo = nullptr;
@@ -100,29 +87,20 @@ private:
     QPushButton* m_textFindNext = nullptr;
     QPushButton* m_textFindLast = nullptr;
     QPushButton* m_textFindClear = nullptr;
-    QCheckBox* m_textFindRegex = nullptr;
-    QCheckBox* m_textFindCase = nullptr;
     QLabel* m_textFindStatus = nullptr;
     QStringList m_textFindHistory;
-    QList<QTextEdit::ExtraSelection> m_textFindHighlights;
-    int m_textFindCurrent = -1;
 
     QTextBrowser* m_textBrowser = nullptr;
     QCheckBox* m_wrapCheck = nullptr;
     QCheckBox* m_showLineNumberCheck = nullptr;
-    QCheckBox* m_showTimestampCheck = nullptr;
     QScrollBar* m_logScrollBar = nullptr;
 
     QLabel* m_labelSize = nullptr;
     QLabel* m_labelLines = nullptr;
     QLabel* m_labelState = nullptr;
     QProgressBar* m_progressBar = nullptr;
-    QSpinBox* m_bufferSizeSpin = nullptr;
 
-    static constexpr int DEFAULT_BUFFER = 5000;
-    static constexpr int PREFETCH_MARGIN = 1000;
     int m_bufferPointer = 0;
-    int m_totalRowCount = 0;
     QVector<QVector<QString>> m_buffer;
     QStringList m_bufferHeaders;
 
