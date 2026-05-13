@@ -136,7 +136,7 @@ void MainWindow::onAbout() {
     box->setTextInteractionFlags(Qt::TextBrowserInteraction);
     box->setText(
         "<h2>Logalizer</h2>"
-        "<p>High-performance JSON Lines log analyzer.<br>"
+        "<p>High-performance log file analyzer.<br>"
         "A simple, zero-configuration desktop alternative to <code>lnav</code>.</p>"
         "<ul>"
         "<li>FTS5-backed text search and row navigation</li>"
