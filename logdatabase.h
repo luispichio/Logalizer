@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QSet>
 #include <QSqlDatabase>
+#include <QStringList>
 #include <QVector>
 #include "linerecord.h"
 
@@ -29,6 +30,15 @@ public:
                       const QString& ftsQuery,
                       int fromLineNumber,
                       bool backwards);
+    int findFilteredLine(int fileId,
+                         const QString& ftsFilter,
+                         int fromLineNumber,
+                         bool backwards);
+    int findTextLine(int fileId,
+                     const QString& ftsFilter,
+                     const QStringList& words,
+                     int fromLineNumber,
+                     bool backwards);
     int rowCount(int fileId);
     qint64 totalDbUsedBytes() const;
     qint64 totalDbSizeBytes() const;

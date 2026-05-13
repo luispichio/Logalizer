@@ -3,7 +3,24 @@
 #include <QVariant>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QStringList>
 #include <QtLogging>
+
+namespace {
+QString escapedLikePattern(const QString& word) {
+    QString pattern;
+    pattern.reserve(word.size() + 2);
+    pattern += '%';
+    for (const QChar ch : word) {
+        if (ch == '\\' || ch == '%' || ch == '_') {
+            pattern += '\\';
+        }
+        pattern += ch;
+    }
+    pattern += '%';
+    return pattern;
+}
+}
 
 LogDatabase& LogDatabase::instance() {
     static LogDatabase inst;
@@ -246,6 +263,100 @@ int LogDatabase::findMatchLine(int fileId,
 
     if (!q.exec()) {
         qWarning() << "LogDatabase::findMatchLine: failed:" << q.lastError().text()
+                   << "\nSQL:" << sql;
+        return -1;
+    }
+
+    if (!q.next()) {
+        return -1;
+    }
+
+    return q.value(0).toInt();
+}
+
+int LogDatabase::findFilteredLine(int fileId,
+                                  const QString& ftsFilter,
+                                  int fromLineNumber,
+                                  bool backwards) {
+    QMutexLocker locker(&m_mutex);
+
+    const QString filter = ftsFilter.trimmed();
+    if (filter.isEmpty()) {
+        return qMax(0, fromLineNumber);
+    }
+
+    const QString table = tableName(fileId);
+    const QString sql = backwards
+        ? QString("SELECT rowid - 1 FROM %1 WHERE %1 MATCH ? AND rowid <= ? ORDER BY rowid DESC LIMIT 1").arg(table)
+        : QString("SELECT rowid - 1 FROM %1 WHERE %1 MATCH ? AND rowid >= ? ORDER BY rowid ASC LIMIT 1").arg(table);
+
+    QSqlQuery q(m_db);
+    q.prepare(sql);
+    q.addBindValue(filter);
+    q.addBindValue(qMax(1, fromLineNumber + 1));
+
+    if (!q.exec()) {
+        qWarning() << "LogDatabase::findFilteredLine: failed:" << q.lastError().text()
+                   << "\nSQL:" << sql;
+        return -1;
+    }
+
+    if (!q.next()) {
+        return -1;
+    }
+
+    return q.value(0).toInt();
+}
+
+int LogDatabase::findTextLine(int fileId,
+                              const QString& ftsFilter,
+                              const QStringList& words,
+                              int fromLineNumber,
+                              bool backwards) {
+    QMutexLocker locker(&m_mutex);
+
+    QStringList cleanWords;
+    for (const QString& word : words) {
+        const QString trimmed = word.trimmed();
+        if (!trimmed.isEmpty()) {
+            cleanWords << trimmed;
+        }
+    }
+    if (cleanWords.isEmpty()) {
+        return -1;
+    }
+
+    const QString filter = ftsFilter.trimmed();
+    const bool hasFilter = !filter.isEmpty();
+    const QString table = tableName(fileId);
+    QStringList predicates;
+    predicates.reserve(cleanWords.size());
+    for (int i = 0; i < cleanWords.size(); ++i) {
+        predicates << "raw LIKE ? ESCAPE '\\'";
+    }
+
+    const QString directionPredicate = backwards ? "rowid <= ?" : "rowid >= ?";
+    const QString order = backwards ? "DESC" : "ASC";
+    QString sql = QString("SELECT rowid - 1 FROM %1 WHERE ").arg(table);
+    if (hasFilter) {
+        sql += QString("%1 MATCH ? AND ").arg(table);
+    }
+    sql += directionPredicate;
+    sql += " AND (" + predicates.join(" OR ") + ")";
+    sql += QString(" ORDER BY rowid %1 LIMIT 1").arg(order);
+
+    QSqlQuery q(m_db);
+    q.prepare(sql);
+    if (hasFilter) {
+        q.addBindValue(filter);
+    }
+    q.addBindValue(qMax(1, fromLineNumber + 1));
+    for (const QString& word : cleanWords) {
+        q.addBindValue(escapedLikePattern(word));
+    }
+
+    if (!q.exec()) {
+        qWarning() << "LogDatabase::findTextLine: failed:" << q.lastError().text()
                    << "\nSQL:" << sql;
         return -1;
     }

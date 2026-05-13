@@ -22,6 +22,8 @@
 #include <QWheelEvent>
 #include <QtLogging>
 
+#include <algorithm>
+
 LogWidget::LogWidget(const QString& filePath, int fileId, QWidget* parent)
     : QWidget(parent)
     , m_filePath(filePath)
@@ -98,12 +100,12 @@ void LogWidget::setupUi() {
         auto* ftsBar = new QHBoxLayout();
         ftsBar->setContentsMargins(2, 2, 2, 2);
         ftsBar->setSpacing(4);
-        ftsBar->addWidget(new QLabel("FTS5:", viewContainer));
+        ftsBar->addWidget(new QLabel("Filter:", viewContainer));
         m_searchEdit = new QLineEdit(viewContainer);
-        m_searchEdit->setPlaceholderText("Search whole file with FTS5... (Enter)");
-        m_searchEdit->setToolTip("Full-text search across all indexed log lines");
+        m_searchEdit->setPlaceholderText("Filter lines with FTS5... (Enter)");
+        m_searchEdit->setToolTip("Filter indexed log lines with an FTS5 expression");
         ftsBar->addWidget(m_searchEdit, 1);
-        m_searchButton = new QPushButton("Search", viewContainer);
+        m_searchButton = new QPushButton("Apply", viewContainer);
         ftsBar->addWidget(m_searchButton);
         m_searchStatus = new QLabel("", viewContainer);
         m_searchStatus->setMinimumWidth(120);
@@ -126,7 +128,7 @@ void LogWidget::setupUi() {
             m_textFindCombo->setEditable(true);
             m_textFindCombo->setInsertPolicy(QComboBox::NoInsert);
             m_textFindCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-            m_textFindCombo->lineEdit()->setPlaceholderText("Jump search with FTS5... (Enter)");
+            m_textFindCombo->lineEdit()->setPlaceholderText("Find words in filtered lines... (Enter)");
             fl->addWidget(m_textFindCombo, 1);
 
             m_textFindFirst = new QPushButton("⏮", m_textFindBar);
@@ -155,6 +157,10 @@ void LogWidget::setupUi() {
         viewLayout->addWidget(m_textFindBar);
 
         connect(m_textFindCombo->lineEdit(), &QLineEdit::returnPressed, this, &LogWidget::onTextFindSearch);
+        connect(m_textFindCombo->lineEdit(), &QLineEdit::textChanged, this, [this]() {
+            m_findWords = currentFindWords();
+            applyBufferToView();
+        });
         connect(m_textFindCombo, QOverload<int>::of(&QComboBox::activated), this, [this](int) { onTextFindSearch(); });
         connect(m_textFindFirst, &QPushButton::clicked, this, &LogWidget::onTextFindFirst);
         connect(m_textFindPrev, &QPushButton::clicked, this, &LogWidget::onTextFindPrev);
@@ -187,7 +193,7 @@ void LogWidget::setupUi() {
         m_logScrollBar->setPageStep(1);
         m_logScrollBar->setToolTip("Navigate rows (position = first row in buffer)");
         connect(m_logScrollBar, &QScrollBar::valueChanged, this, [this](int value) {
-            setPointer(value);
+            setPointer(value, false, value < m_bufferPointer);
         });
 
         auto* contentBox = new QHBoxLayout();
@@ -320,16 +326,25 @@ void LogWidget::updateScrollBar() {
     }
 
     const int visibleRows = visibleRowCount();
+    const bool hasFilter = !m_ftsFilter.trimmed().isEmpty();
     m_logScrollBar->blockSignals(true);
     m_logScrollBar->setPageStep(visibleRows);
-    m_logScrollBar->setMaximum(qMax(0, static_cast<int>(m_totalLines) - visibleRows));
+    m_logScrollBar->setMaximum(qMax(0, static_cast<int>(m_totalLines) - (hasFilter ? 1 : visibleRows)));
     m_logScrollBar->setValue(qBound(0, m_bufferPointer, m_logScrollBar->maximum()));
     m_logScrollBar->blockSignals(false);
 }
 
-void LogWidget::setPointer(int p, bool force) {
-    int maxP = qMax(0, static_cast<int>(m_totalLines) - visibleRowCount());
+void LogWidget::setPointer(int p, bool force, bool backwards) {
+    const bool hasFilter = !m_ftsFilter.trimmed().isEmpty();
+    int maxP = qMax(0, static_cast<int>(m_totalLines) - (hasFilter ? 1 : visibleRowCount()));
     p = qBound(0, p, maxP);
+
+    if (hasFilter) {
+        const int filtered = filteredLineAt(p, backwards);
+        if (filtered >= 0) {
+            p = qBound(0, filtered, maxP);
+        }
+    }
 
     int delta = p - m_bufferPointer;
     if (!force && delta == 0) {
@@ -342,6 +357,48 @@ void LogWidget::setPointer(int p, bool force) {
 
     applyBufferToView();
     updateStatusLabel();
+}
+
+int LogWidget::filteredLineAt(int lineNumber, bool backwards) const {
+    const QString filter = m_ftsFilter.trimmed();
+    if (filter.isEmpty()) {
+        return qBound(0, lineNumber, qMax(0, static_cast<int>(m_totalLines) - 1));
+    }
+
+    const int bounded = qBound(0, lineNumber, qMax(0, static_cast<int>(m_totalLines) - 1));
+    int line = LogDatabase::instance().findFilteredLine(m_fileId, filter, bounded, backwards);
+    if (line < 0) {
+        line = LogDatabase::instance().findFilteredLine(m_fileId, filter, bounded, !backwards);
+    }
+    return line;
+}
+
+void LogWidget::moveFiltered(int steps) {
+    if (steps == 0) {
+        return;
+    }
+
+    if (m_ftsFilter.trimmed().isEmpty()) {
+        setPointer(m_bufferPointer + steps);
+        return;
+    }
+
+    const bool backwards = steps < 0;
+    int line = m_bufferPointer;
+    int remaining = qAbs(steps);
+    while (remaining-- > 0) {
+        const int candidate = LogDatabase::instance().findFilteredLine(
+            m_fileId,
+            m_ftsFilter,
+            line + (backwards ? -1 : 1),
+            backwards);
+        if (candidate < 0 || candidate == line) {
+            break;
+        }
+        line = candidate;
+    }
+
+    setPointer(line, false, backwards);
 }
 
 void LogWidget::fillBuffer() {
@@ -396,8 +453,68 @@ QString LogWidget::buildRowHtml(const QVector<QString>& row) const {
         prefix += " <span style=\"color:#586e75;\">|</span> ";
     }
 
-    const QString raw = (rawIdx >= 0 && rawIdx < row.size()) ? row[rawIdx].toHtmlEscaped() : QString();
+    const QString raw = (rawIdx >= 0 && rawIdx < row.size()) ? highlightFindWords(row[rawIdx]) : QString();
     return prefix + raw + "\n";
+}
+
+QString LogWidget::highlightFindWords(const QString& raw) const {
+    if (raw.isEmpty() || m_findWords.isEmpty()) {
+        return raw.toHtmlEscaped();
+    }
+
+    QVector<QPair<int, int>> ranges;
+    for (const QString& word : m_findWords) {
+        int pos = 0;
+        while ((pos = raw.indexOf(word, pos, Qt::CaseInsensitive)) >= 0) {
+            ranges << qMakePair(pos, pos + word.size());
+            pos += qMax(1, word.size());
+        }
+    }
+
+    if (ranges.isEmpty()) {
+        return raw.toHtmlEscaped();
+    }
+
+    std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) {
+        return a.first == b.first ? a.second < b.second : a.first < b.first;
+    });
+
+    QVector<QPair<int, int>> merged;
+    for (const auto& range : ranges) {
+        if (merged.isEmpty() || range.first > merged.last().second) {
+            merged << range;
+        } else {
+            merged.last().second = qMax(merged.last().second, range.second);
+        }
+    }
+
+    QString html;
+    html.reserve(raw.size() + merged.size() * 20);
+    int cursor = 0;
+    for (const auto& range : merged) {
+        html += raw.mid(cursor, range.first - cursor).toHtmlEscaped();
+        html += "<span style=\"background-color:#fff59d; color:#111111;\">";
+        html += raw.mid(range.first, range.second - range.first).toHtmlEscaped();
+        html += "</span>";
+        cursor = range.second;
+    }
+    html += raw.mid(cursor).toHtmlEscaped();
+    return html;
+}
+
+QStringList LogWidget::currentFindWords() const {
+    if (!m_textFindCombo) {
+        return {};
+    }
+
+    QStringList words;
+    const QStringList parts = m_textFindCombo->currentText().simplified().split(' ', Qt::SkipEmptyParts);
+    for (const QString& part : parts) {
+        if (!words.contains(part, Qt::CaseInsensitive)) {
+            words << part;
+        }
+    }
+    return words;
 }
 
 void LogWidget::updateStatusLabel() {
@@ -429,7 +546,7 @@ bool LogWidget::eventFilter(QObject* obj, QEvent* event) {
         int angle = we->angleDelta().y();
         int steps = -(angle / 15);
         if (steps != 0) {
-            setPointer(m_bufferPointer + steps);
+            moveFiltered(steps);
         }
         return true;
     }
@@ -443,12 +560,12 @@ bool LogWidget::eventFilter(QObject* obj, QEvent* event) {
         auto* ke = static_cast<QKeyEvent*>(event);
         int pageRows = visibleRowCount();
         switch (ke->key()) {
-        case Qt::Key_Down: setPointer(m_bufferPointer + 1); return true;
-        case Qt::Key_Up: setPointer(m_bufferPointer - 1); return true;
-        case Qt::Key_PageDown: setPointer(m_bufferPointer + pageRows); return true;
-        case Qt::Key_PageUp: setPointer(m_bufferPointer - pageRows); return true;
-        case Qt::Key_Home: setPointer(0, true); return true;
-        case Qt::Key_End: setPointer(qMax(0, static_cast<int>(m_totalLines) - visibleRowCount()), true); return true;
+        case Qt::Key_Down: moveFiltered(1); return true;
+        case Qt::Key_Up: moveFiltered(-1); return true;
+        case Qt::Key_PageDown: moveFiltered(pageRows); return true;
+        case Qt::Key_PageUp: moveFiltered(-pageRows); return true;
+        case Qt::Key_Home: setPointer(0, true, false); return true;
+        case Qt::Key_End: setPointer(qMax(0, static_cast<int>(m_totalLines) - 1), true, true); return true;
         default: break;
         }
     }
@@ -472,16 +589,19 @@ void LogWidget::onToggleTextFindBar() {
 }
 
 void LogWidget::onTextFindSearch() {
-    jumpToMatch(m_bufferPointer, false, "No match");
+    jumpToTextMatch(m_bufferPointer, false, "No match");
 }
 
-void LogWidget::jumpToMatch(int fromLineNumber, bool backwards, const QString& notFoundText) {
+void LogWidget::jumpToTextMatch(int fromLineNumber, bool backwards, const QString& notFoundText) {
     if (!m_textFindCombo) {
         return;
     }
 
     const QString query = m_textFindCombo->currentText().trimmed();
+    m_findWords = currentFindWords();
     if (query.isEmpty()) {
+        m_findWords.clear();
+        applyBufferToView();
         if (m_textFindStatus) {
             m_textFindStatus->setText("");
         }
@@ -501,8 +621,9 @@ void LogWidget::jumpToMatch(int fromLineNumber, bool backwards, const QString& n
     }
 
     const int boundedFrom = qBound(0, fromLineNumber, qMax(0, static_cast<int>(m_totalLines) - 1));
-    const int line = LogDatabase::instance().findMatchLine(m_fileId, m_ftsFilter, query, boundedFrom, backwards);
+    const int line = LogDatabase::instance().findTextLine(m_fileId, m_ftsFilter, m_findWords, boundedFrom, backwards);
     if (line < 0) {
+        applyBufferToView();
         if (m_textFindStatus) {
             m_textFindStatus->setText(notFoundText);
         }
@@ -516,28 +637,30 @@ void LogWidget::jumpToMatch(int fromLineNumber, bool backwards, const QString& n
 }
 
 void LogWidget::onTextFindNext() {
-    jumpToMatch(m_bufferPointer + 1, false, "No next match");
+    jumpToTextMatch(m_bufferPointer + 1, false, "No next match");
 }
 
 void LogWidget::onTextFindPrev() {
-    jumpToMatch(m_bufferPointer - 1, true, "No previous match");
+    jumpToTextMatch(m_bufferPointer - 1, true, "No previous match");
 }
 
 void LogWidget::onTextFindFirst() {
-    jumpToMatch(0, false, "No match");
+    jumpToTextMatch(0, false, "No match");
 }
 
 void LogWidget::onTextFindLast() {
-    jumpToMatch(qMax(0, static_cast<int>(m_totalLines) - 1), true, "No match");
+    jumpToTextMatch(qMax(0, static_cast<int>(m_totalLines) - 1), true, "No match");
 }
 
 void LogWidget::onTextFindClear() {
     if (m_textFindCombo) {
         m_textFindCombo->setCurrentText("");
     }
+    m_findWords.clear();
     if (m_textBrowser) {
         m_textBrowser->setExtraSelections({});
     }
+    applyBufferToView();
     if (m_textFindStatus) {
         m_textFindStatus->setText("");
     }

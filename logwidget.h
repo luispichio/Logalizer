@@ -56,11 +56,15 @@ private:
     void refreshData();
     void updateStatusLabel();
     QString buildRowHtml(const QVector<QString>& row) const;
+    QString highlightFindWords(const QString& raw) const;
+    QStringList currentFindWords() const;
     int visibleRowCount() const;
     void updateScrollBar();
-    void jumpToMatch(int fromLineNumber, bool backwards, const QString& notFoundText);
+    void jumpToTextMatch(int fromLineNumber, bool backwards, const QString& notFoundText);
+    void moveFiltered(int steps);
+    int filteredLineAt(int lineNumber, bool backwards) const;
 
-    void setPointer(int p, bool force = false);
+    void setPointer(int p, bool force = false, bool backwards = false);
     void fillBuffer();
     void applyBufferToView();
 
@@ -89,6 +93,7 @@ private:
     QPushButton* m_textFindClear = nullptr;
     QLabel* m_textFindStatus = nullptr;
     QStringList m_textFindHistory;
+    QStringList m_findWords;
 
     QTextBrowser* m_textBrowser = nullptr;
     QCheckBox* m_wrapCheck = nullptr;
