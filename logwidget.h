@@ -8,6 +8,7 @@
 #include "logdatabase.h"
 
 class FileWorker;
+class ProcessWorker;
 class StreamWorker;
 class QTextBrowser;
 class QLineEdit;
@@ -26,7 +27,8 @@ class LogWidget : public QWidget
 public:
     enum class SourceType {
         File,
-        Stdin
+        Stdin,
+        Command
     };
 
     explicit LogWidget(const QString& filePath, int fileId, QWidget* parent = nullptr);
@@ -81,6 +83,7 @@ private:
 
     QThread* m_workerThread = nullptr;
     FileWorker* m_worker = nullptr;
+    ProcessWorker* m_processWorker = nullptr;
     StreamWorker* m_streamWorker = nullptr;
 
     QTimer* m_refreshTimer = nullptr;

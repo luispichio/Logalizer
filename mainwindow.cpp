@@ -4,12 +4,14 @@
 #include "version.h"
 
 #include <QLabel>
+#include <QLineEdit>
 #include <QTimer>
 #include <QTabWidget>
 #include <QMenuBar>
 #include <QToolBar>
 #include <QStatusBar>
 #include <QFileDialog>
+#include <QInputDialog>
 #include <QMessageBox>
 #include <QFileInfo>
 #include <QAction>
@@ -50,6 +52,11 @@ void MainWindow::setupUi() {
     connect(openAction, &QAction::triggered, this, &MainWindow::onOpenFile);
     fileMenu->addAction(openAction);
 
+    auto* runCommandAction = new QAction(QIcon::fromTheme("system-run"), "&Run Command...", this);
+    runCommandAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
+    connect(runCommandAction, &QAction::triggered, this, &MainWindow::onRunCommand);
+    fileMenu->addAction(runCommandAction);
+
     fileMenu->addSeparator();
 
     auto* exitAction = new QAction("E&xit", this);
@@ -65,6 +72,7 @@ void MainWindow::setupUi() {
     // ─── Toolbar ─────────────────────────────────────────────────────
     auto* toolBar = addToolBar("Main");
     toolBar->addAction(openAction);
+    toolBar->addAction(runCommandAction);
     toolBar->addSeparator();
     toolBar->addAction(aboutAction);
 
@@ -105,6 +113,23 @@ void MainWindow::onOpenFile() {
     }
 }
 
+void MainWindow::onRunCommand() {
+    bool ok = false;
+    const QString command = QInputDialog::getText(
+        this,
+        "Run Command",
+        "Command:",
+        QLineEdit::Normal,
+        QString(),
+        &ok).trimmed();
+
+    if (!ok || command.isEmpty()) {
+        return;
+    }
+
+    openCommand(command);
+}
+
 void MainWindow::openFile(const QString& filePath) {
     int fileId = m_nextFileId++;
 
@@ -130,6 +155,24 @@ void MainWindow::openStdin() {
 
     statusBar()->showMessage("Reading from stdin", 5000);
     qInfo() << "MainWindow: Opened stdin as file_id" << fileId;
+}
+
+void MainWindow::openCommand(const QString& command) {
+    int fileId = m_nextFileId++;
+
+    auto* widget = new LogWidget(LogWidget::SourceType::Command, command, fileId, this);
+
+    QString tabTitle = command.simplified();
+    if (tabTitle.size() > 32) {
+        tabTitle = tabTitle.left(29) + "...";
+    }
+
+    int tabIndex = m_tabWidget->addTab(widget, tabTitle);
+    m_tabWidget->setCurrentIndex(tabIndex);
+    m_tabWidget->setTabToolTip(tabIndex, command);
+
+    statusBar()->showMessage(QString("Running: %1").arg(command), 5000);
+    qInfo() << "MainWindow: Running command" << command << "as file_id" << fileId;
 }
 
 void MainWindow::onCloseTab(int index) {

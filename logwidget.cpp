@@ -1,5 +1,6 @@
 #include "logwidget.h"
 #include "fileworker.h"
+#include "processworker.h"
 #include "streamworker.h"
 
 #include <QCheckBox>
@@ -58,7 +59,7 @@ LogWidget::LogWidget(SourceType sourceType, const QString& displayName, int file
         connect(m_worker, &FileWorker::finished, this, &LogWidget::onFinished);
         connect(m_worker, &FileWorker::error, this, &LogWidget::onError);
         connect(m_workerThread, &QThread::finished, m_worker, &QObject::deleteLater);
-    } else {
+    } else if (m_sourceType == SourceType::Stdin) {
         m_streamWorker = new StreamWorker(fileId);
         m_streamWorker->moveToThread(m_workerThread);
 
@@ -68,6 +69,16 @@ LogWidget::LogWidget(SourceType sourceType, const QString& displayName, int file
         connect(m_streamWorker, &StreamWorker::finished, this, &LogWidget::onFinished);
         connect(m_streamWorker, &StreamWorker::error, this, &LogWidget::onError);
         connect(m_workerThread, &QThread::finished, m_streamWorker, &QObject::deleteLater);
+    } else {
+        m_processWorker = new ProcessWorker(displayName, fileId);
+        m_processWorker->moveToThread(m_workerThread);
+
+        connect(m_workerThread, &QThread::started, m_processWorker, &ProcessWorker::start);
+        connect(m_processWorker, &ProcessWorker::progressUpdate, this, &LogWidget::onProgressUpdate);
+        connect(m_processWorker, &ProcessWorker::chunkInserted, this, &LogWidget::onChunkInserted);
+        connect(m_processWorker, &ProcessWorker::finished, this, &LogWidget::onFinished);
+        connect(m_processWorker, &ProcessWorker::error, this, &LogWidget::onError);
+        connect(m_workerThread, &QThread::finished, m_processWorker, &QObject::deleteLater);
     }
 
     m_workerThread->start();
@@ -77,6 +88,9 @@ LogWidget::~LogWidget() {
     m_refreshTimer->stop();
     if (m_worker) {
         m_worker->stop();
+    }
+    if (m_processWorker) {
+        m_processWorker->stop();
     }
     if (m_streamWorker) {
         m_streamWorker->stop();

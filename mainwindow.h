@@ -21,6 +21,7 @@ public:
 
 private slots:
     void onOpenFile();
+    void onRunCommand();
     void onCloseTab(int index);
     void onAbout();
     void updateMemoryLabel();   // updates DB size indicator every 2 s
@@ -28,6 +29,7 @@ private slots:
 private:
     void setupUi();
     void openFile(const QString& filePath);
+    void openCommand(const QString& command);
 
     QTabWidget* m_tabWidget    = nullptr;
     QLabel*     m_labelMemory  = nullptr;  // status bar: SQLite DB size

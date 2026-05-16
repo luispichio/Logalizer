@@ -60,6 +60,7 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         logwidget.h logwidget.cpp
         linerecord.h
         fileworker.h fileworker.cpp
+        processworker.h processworker.cpp
         streamworker.h streamworker.cpp
         logdatabase.h logdatabase.cpp
     )
