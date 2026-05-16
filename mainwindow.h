@@ -17,6 +17,8 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+    void openStdin();
+
 private slots:
     void onOpenFile();
     void onCloseTab(int index);

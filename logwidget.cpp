@@ -1,5 +1,6 @@
 #include "logwidget.h"
 #include "fileworker.h"
+#include "streamworker.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -25,26 +26,49 @@
 #include <algorithm>
 
 LogWidget::LogWidget(const QString& filePath, int fileId, QWidget* parent)
+    : LogWidget(SourceType::File, filePath, fileId, parent)
+{
+}
+
+LogWidget::LogWidget(SourceType sourceType, const QString& displayName, int fileId, QWidget* parent)
     : QWidget(parent)
-    , m_filePath(filePath)
+    , m_filePath(displayName)
     , m_fileId(fileId)
+    , m_sourceType(sourceType)
 {
     setupUi();
 
-    QFileInfo fi(filePath);
-    m_fileSize = fi.size();
-    m_labelSize->setText(QString::number(m_fileSize / 1024.0 / 1024.0, 'f', 2) + " MB");
+    if (m_sourceType == SourceType::File) {
+        QFileInfo fi(displayName);
+        m_fileSize = fi.size();
+        m_labelSize->setText(QString::number(m_fileSize / 1024.0 / 1024.0, 'f', 2) + " MB");
+    } else {
+        m_labelSize->setText("stream");
+        m_progressBar->setRange(0, 0);
+    }
 
     m_workerThread = new QThread(this);
-    m_worker = new FileWorker(filePath, fileId);
-    m_worker->moveToThread(m_workerThread);
+    if (m_sourceType == SourceType::File) {
+        m_worker = new FileWorker(displayName, fileId);
+        m_worker->moveToThread(m_workerThread);
 
-    connect(m_workerThread, &QThread::started, m_worker, &FileWorker::start);
-    connect(m_worker, &FileWorker::progressUpdate, this, &LogWidget::onProgressUpdate);
-    connect(m_worker, &FileWorker::chunkInserted, this, &LogWidget::onChunkInserted);
-    connect(m_worker, &FileWorker::finished, this, &LogWidget::onFinished);
-    connect(m_worker, &FileWorker::error, this, &LogWidget::onError);
-    connect(m_workerThread, &QThread::finished, m_worker, &QObject::deleteLater);
+        connect(m_workerThread, &QThread::started, m_worker, &FileWorker::start);
+        connect(m_worker, &FileWorker::progressUpdate, this, &LogWidget::onProgressUpdate);
+        connect(m_worker, &FileWorker::chunkInserted, this, &LogWidget::onChunkInserted);
+        connect(m_worker, &FileWorker::finished, this, &LogWidget::onFinished);
+        connect(m_worker, &FileWorker::error, this, &LogWidget::onError);
+        connect(m_workerThread, &QThread::finished, m_worker, &QObject::deleteLater);
+    } else {
+        m_streamWorker = new StreamWorker(fileId);
+        m_streamWorker->moveToThread(m_workerThread);
+
+        connect(m_workerThread, &QThread::started, m_streamWorker, &StreamWorker::start);
+        connect(m_streamWorker, &StreamWorker::progressUpdate, this, &LogWidget::onProgressUpdate);
+        connect(m_streamWorker, &StreamWorker::chunkInserted, this, &LogWidget::onChunkInserted);
+        connect(m_streamWorker, &StreamWorker::finished, this, &LogWidget::onFinished);
+        connect(m_streamWorker, &StreamWorker::error, this, &LogWidget::onError);
+        connect(m_workerThread, &QThread::finished, m_streamWorker, &QObject::deleteLater);
+    }
 
     m_workerThread->start();
 }
@@ -53,6 +77,9 @@ LogWidget::~LogWidget() {
     m_refreshTimer->stop();
     if (m_worker) {
         m_worker->stop();
+    }
+    if (m_streamWorker) {
+        m_streamWorker->stop();
     }
     if (m_workerThread) {
         m_workerThread->quit();
@@ -234,8 +261,13 @@ void LogWidget::onProgressUpdate(int fileId, qint64 bytesProcessed, qint64 total
         return;
     }
 
-    int percent = totalBytes > 0 ? static_cast<int>(bytesProcessed * 100 / totalBytes) : 0;
-    m_progressBar->setValue(percent);
+    if (totalBytes > 0) {
+        if (m_progressBar->minimum() == 0 && m_progressBar->maximum() == 0) {
+            m_progressBar->setRange(0, 100);
+        }
+        int percent = static_cast<int>(bytesProcessed * 100 / totalBytes);
+        m_progressBar->setValue(percent);
+    }
     m_labelLines->setText(QString::number(linesProcessed));
     m_totalLines = linesProcessed;
 }
@@ -256,6 +288,9 @@ void LogWidget::onFinished(int fileId) {
     }
 
     m_refreshTimer->stop();
+    if (m_progressBar->minimum() == 0 && m_progressBar->maximum() == 0) {
+        m_progressBar->setRange(0, 100);
+    }
     m_progressBar->setValue(100);
 
     fillBuffer();

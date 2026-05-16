@@ -119,6 +119,19 @@ void MainWindow::openFile(const QString& filePath) {
     qInfo() << "MainWindow: Opened file" << filePath << "as file_id" << fileId;
 }
 
+void MainWindow::openStdin() {
+    int fileId = m_nextFileId++;
+
+    auto* widget = new LogWidget(LogWidget::SourceType::Stdin, "stdin", fileId, this);
+
+    int tabIndex = m_tabWidget->addTab(widget, "stdin");
+    m_tabWidget->setCurrentIndex(tabIndex);
+    m_tabWidget->setTabToolTip(tabIndex, "Standard input stream");
+
+    statusBar()->showMessage("Reading from stdin", 5000);
+    qInfo() << "MainWindow: Opened stdin as file_id" << fileId;
+}
+
 void MainWindow::onCloseTab(int index) {
     auto* widget = m_tabWidget->widget(index);
     m_tabWidget->removeTab(index);

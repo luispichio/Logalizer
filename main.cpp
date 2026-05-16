@@ -20,6 +20,10 @@ int main(int argc, char *argv[])
         }
     }
     MainWindow w;
+    const QStringList args = a.arguments().mid(1);
+    if (args.contains("-") || args.contains("--stdin")) {
+        w.openStdin();
+    }
     w.show();
 
     return a.exec();
