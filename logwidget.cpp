@@ -10,11 +10,17 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QHBoxLayout>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
+#include <QJsonValue>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScrollBar>
 #include <QShortcut>
 #include <QTextBrowser>
@@ -25,6 +31,14 @@
 #include <QtLogging>
 
 #include <algorithm>
+
+namespace {
+QStringList splitJsonFilterTokens(const QString& text) {
+    QString normalized = text;
+    normalized.replace(',', ' ');
+    return normalized.simplified().split(' ', Qt::SkipEmptyParts);
+}
+}
 
 LogWidget::LogWidget(const QString& filePath, int fileId, QWidget* parent)
     : LogWidget(SourceType::File, filePath, fileId, parent)
@@ -126,10 +140,29 @@ void LogWidget::setupUi() {
         m_showLineNumberCheck->setToolTip("Show the line number prefix in the text view");
         m_showLineNumberCheck->setChecked(true);
         toolBar->addWidget(m_showLineNumberCheck);
+
+        m_jsonHelperCheck = new QCheckBox("JSON", this);
+        m_jsonHelperCheck->setToolTip("Parse visible JSON lines while rendering");
+        toolBar->addWidget(m_jsonHelperCheck);
+
+        m_jsonFieldFilterEdit = new QLineEdit(this);
+        m_jsonFieldFilterEdit->setPlaceholderText("Fields: level,msg,user.id,-metadata.*");
+        m_jsonFieldFilterEdit->setToolTip("Include fields by name/path, exclude with '-', wildcard prefixes with .*.");
+        m_jsonFieldFilterEdit->setMaximumWidth(320);
+        toolBar->addWidget(m_jsonFieldFilterEdit);
+
+        m_jsonCompactCheck = new QCheckBox("Compact", this);
+        m_jsonCompactCheck->setToolTip("Show JSON as compact key=value pairs aligned within the visible buffer");
+        m_jsonCompactCheck->setChecked(true);
+        toolBar->addWidget(m_jsonCompactCheck);
+
         toolBar->addStretch();
         m_mainLayout->addLayout(toolBar);
         connect(m_wrapCheck, &QCheckBox::toggled, this, &LogWidget::onWrapToggled);
         connect(m_showLineNumberCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); });
+        connect(m_jsonHelperCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); });
+        connect(m_jsonFieldFilterEdit, &QLineEdit::textChanged, this, [this]() { applyBufferToView(); });
+        connect(m_jsonCompactCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); });
     }
 
     {
@@ -464,13 +497,30 @@ void LogWidget::fillBuffer() {
 }
 
 void LogWidget::applyBufferToView() {
+    QMap<QString, int> jsonFieldWidths;
+    if (m_jsonHelperCheck && m_jsonHelperCheck->isChecked()
+        && m_jsonCompactCheck && m_jsonCompactCheck->isChecked()) {
+        const int rawIdx = m_bufferHeaders.indexOf("raw");
+        if (rawIdx >= 0) {
+            for (const auto& row : m_buffer) {
+                if (rawIdx >= row.size()) {
+                    continue;
+                }
+                const auto fields = jsonFieldsForRaw(row[rawIdx]);
+                for (const auto& field : fields) {
+                    jsonFieldWidths[field.first] = qMax(jsonFieldWidths.value(field.first), field.first.size());
+                }
+            }
+        }
+    }
+
     QString html;
     html.reserve(m_buffer.size() * 320);
     html += "<html><body style=\"margin:0; font-family:'Monospace'; font-size:9pt;\">";
     html += QString("<div style=\"white-space:%1;\">")
                 .arg(m_wrapCheck && m_wrapCheck->isChecked() ? "pre-wrap" : "pre");
     for (const auto& row : m_buffer) {
-        html += buildRowHtml(row);
+        html += buildRowHtml(row, jsonFieldWidths);
     }
     html += "</div></body></html>";
 
@@ -481,7 +531,7 @@ void LogWidget::applyBufferToView() {
     }
 }
 
-QString LogWidget::buildRowHtml(const QVector<QString>& row) const {
+QString LogWidget::buildRowHtml(const QVector<QString>& row, const QMap<QString, int>& jsonFieldWidths) const {
     const int lineNumberIdx = m_bufferHeaders.indexOf("line_number");
     const int rawIdx = m_bufferHeaders.indexOf("raw");
 
@@ -502,8 +552,164 @@ QString LogWidget::buildRowHtml(const QVector<QString>& row) const {
         prefix += " <span style=\"color:#586e75;\">|</span> ";
     }
 
-    const QString raw = (rawIdx >= 0 && rawIdx < row.size()) ? highlightFindWords(row[rawIdx]) : QString();
+    const QString display = (rawIdx >= 0 && rawIdx < row.size())
+        ? formatJsonLine(row[rawIdx], jsonFieldWidths)
+        : QString();
+    const QString raw = highlightFindWords(display);
     return prefix + raw + "\n";
+}
+
+QString LogWidget::formatJsonLine(const QString& raw, const QMap<QString, int>& jsonFieldWidths) const {
+    if (!m_jsonHelperCheck || !m_jsonHelperCheck->isChecked()) {
+        return raw;
+    }
+
+    const auto fields = jsonFieldsForRaw(raw);
+    if (fields.isEmpty()) {
+        QJsonParseError parseError;
+        const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &parseError);
+        if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
+            return QString();
+        }
+        return raw;
+    }
+
+    if (!m_jsonCompactCheck || !m_jsonCompactCheck->isChecked()) {
+        return jsonFilterToCompactObject(fields);
+    }
+
+    QStringList parts;
+    parts.reserve(fields.size());
+    for (const auto& field : fields) {
+        const int width = jsonFieldWidths.value(field.first, field.first.size());
+        parts << QString("%1=%2").arg(field.first.leftJustified(width, ' '), field.second);
+    }
+    return parts.join("  ");
+}
+
+QVector<QPair<QString, QString>> LogWidget::jsonFieldsForRaw(const QString& raw) const {
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        return {};
+    }
+
+    QVector<QPair<QString, QString>> fields;
+    const QJsonObject obj = doc.object();
+    for (auto it = obj.constBegin(); it != obj.constEnd(); ++it) {
+        flattenJsonValue(it.key(), it.value(), fields);
+    }
+
+    QVector<QPair<QString, QString>> filtered;
+    filtered.reserve(fields.size());
+    for (const auto& field : fields) {
+        if (jsonFieldAllowed(field.first)) {
+            filtered << field;
+        }
+    }
+    return filtered;
+}
+
+void LogWidget::flattenJsonValue(const QString& path, const QJsonValue& value, QVector<QPair<QString, QString>>& out) const {
+    if (value.isObject()) {
+        const QJsonObject obj = value.toObject();
+        if (obj.isEmpty()) {
+            out << qMakePair(path, QString("{}"));
+            return;
+        }
+        for (auto it = obj.constBegin(); it != obj.constEnd(); ++it) {
+            flattenJsonValue(path + "." + it.key(), it.value(), out);
+        }
+        return;
+    }
+
+    out << qMakePair(path, jsonValueToText(value));
+}
+
+QString LogWidget::jsonValueToText(const QJsonValue& value) const {
+    if (value.isString()) {
+        QString text = value.toString();
+        const bool simple = !text.isEmpty()
+            && text.indexOf(QRegularExpression("[\\s=,{}\\[\\]\"]")) < 0;
+        text.replace('\\', "\\\\");
+        text.replace('"', "\\\"");
+        return simple ? text : QString("\"%1\"").arg(text);
+    }
+    if (value.isBool()) {
+        return value.toBool() ? "true" : "false";
+    }
+    if (value.isDouble()) {
+        return QString::number(value.toDouble(), 'g', 15);
+    }
+    if (value.isNull() || value.isUndefined()) {
+        return "null";
+    }
+
+    QJsonDocument doc;
+    if (value.isArray()) {
+        doc = QJsonDocument(value.toArray());
+    } else if (value.isObject()) {
+        doc = QJsonDocument(value.toObject());
+    }
+    return QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
+}
+
+QString LogWidget::jsonFilterToCompactObject(const QVector<QPair<QString, QString>>& fields) const {
+    QJsonObject obj;
+    for (const auto& field : fields) {
+        obj.insert(field.first, field.second);
+    }
+    return QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact));
+}
+
+QStringList LogWidget::jsonFilterTokens(bool excludes) const {
+    if (!m_jsonFieldFilterEdit) {
+        return {};
+    }
+
+    QStringList tokens;
+    for (QString token : splitJsonFilterTokens(m_jsonFieldFilterEdit->text())) {
+        const bool isExclude = token.startsWith('-');
+        if (isExclude) {
+            token.remove(0, 1);
+        }
+        token = token.trimmed();
+        if (!token.isEmpty() && isExclude == excludes) {
+            tokens << token;
+        }
+    }
+    return tokens;
+}
+
+bool LogWidget::jsonFieldAllowed(const QString& path) const {
+    const QStringList includes = jsonFilterTokens(false);
+    const QStringList excludes = jsonFilterTokens(true);
+
+    bool included = includes.isEmpty();
+    for (const QString& include : includes) {
+        if (jsonPathMatches(path, include)) {
+            included = true;
+            break;
+        }
+    }
+    if (!included) {
+        return false;
+    }
+
+    for (const QString& exclude : excludes) {
+        if (jsonPathMatches(path, exclude)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool LogWidget::jsonPathMatches(const QString& path, const QString& pattern) const {
+    if (pattern.endsWith(".*")) {
+        const QString prefix = pattern.left(pattern.size() - 1);
+        return path.startsWith(prefix, Qt::CaseInsensitive);
+    }
+    return path.compare(pattern, Qt::CaseInsensitive) == 0;
 }
 
 QString LogWidget::highlightFindWords(const QString& raw) const {

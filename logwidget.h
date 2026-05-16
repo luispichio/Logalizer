@@ -5,11 +5,13 @@
 #include <QTimer>
 #include <QVector>
 #include <QWidget>
+#include <QMap>
 #include "logdatabase.h"
 
 class FileWorker;
 class ProcessWorker;
 class StreamWorker;
+class QJsonValue;
 class QTextBrowser;
 class QLineEdit;
 class QProgressBar;
@@ -64,8 +66,16 @@ private:
     void setupUi();
     void refreshData();
     void updateStatusLabel();
-    QString buildRowHtml(const QVector<QString>& row) const;
+    QString buildRowHtml(const QVector<QString>& row, const QMap<QString, int>& jsonFieldWidths) const;
     QString highlightFindWords(const QString& raw) const;
+    QString formatJsonLine(const QString& raw, const QMap<QString, int>& jsonFieldWidths) const;
+    QVector<QPair<QString, QString>> jsonFieldsForRaw(const QString& raw) const;
+    void flattenJsonValue(const QString& path, const QJsonValue& value, QVector<QPair<QString, QString>>& out) const;
+    QString jsonValueToText(const QJsonValue& value) const;
+    QString jsonFilterToCompactObject(const QVector<QPair<QString, QString>>& fields) const;
+    QStringList jsonFilterTokens(bool excludes) const;
+    bool jsonFieldAllowed(const QString& path) const;
+    bool jsonPathMatches(const QString& path, const QString& pattern) const;
     QStringList currentFindWords() const;
     int visibleRowCount() const;
     void updateScrollBar();
@@ -110,6 +120,9 @@ private:
     QTextBrowser* m_textBrowser = nullptr;
     QCheckBox* m_wrapCheck = nullptr;
     QCheckBox* m_showLineNumberCheck = nullptr;
+    QCheckBox* m_jsonHelperCheck = nullptr;
+    QLineEdit* m_jsonFieldFilterEdit = nullptr;
+    QCheckBox* m_jsonCompactCheck = nullptr;
     QScrollBar* m_logScrollBar = nullptr;
 
     QLabel* m_labelSize = nullptr;
