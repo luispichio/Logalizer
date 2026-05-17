@@ -561,6 +561,10 @@ void LogWidget::fillBuffer() {
 }
 
 void LogWidget::applyBufferToView() {
+    const int horizontalScrollValue = (m_textBrowser && m_textBrowser->horizontalScrollBar())
+        ? m_textBrowser->horizontalScrollBar()->value()
+        : 0;
+
     QMap<QString, int> jsonFieldWidths;
     if (m_jsonHelperCheck && m_jsonHelperCheck->isChecked()
         && m_jsonCompactCheck && m_jsonCompactCheck->isChecked()) {
@@ -592,6 +596,13 @@ void LogWidget::applyBufferToView() {
 
     if (m_textBrowser) {
         m_textBrowser->setExtraSelections({});
+        QTimer::singleShot(0, this, [this, horizontalScrollValue]() {
+            if (!m_textBrowser || !m_textBrowser->horizontalScrollBar()) {
+                return;
+            }
+            auto* bar = m_textBrowser->horizontalScrollBar();
+            bar->setValue(qBound(0, horizontalScrollValue, bar->maximum()));
+        });
     }
 }
 
