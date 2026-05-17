@@ -97,7 +97,7 @@ El sistema de packaging está integrado en CMake vía **CPack**. La versión del
 sudo apt install dpkg-dev rpm
 
 # Debian / Ubuntu (flujo completo con AppImage)
-sudo apt install build-essential cmake ninja-build qt6-base-dev qt6-tools-dev qt6-tools-dev-tools libqt6sql6-sqlite libgl1-mesa-dev libxkbcommon-dev libvulkan-dev wget file libfuse2
+sudo apt install build-essential cmake ninja-build qt6-base-dev libqt6sql6-sqlite libgl1-mesa-dev libxkbcommon-dev libvulkan-dev wget file libfuse2
 
 # Fedora / openSUSE (.rpm)
 sudo dnf install rpm-build
