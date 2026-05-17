@@ -3,7 +3,7 @@
 
 #include <QIODevice>
 #include <QTextStream>
-#include <QtLogging>
+#include <QtCore/QtLogging>
 
 #include <cstdio>
 

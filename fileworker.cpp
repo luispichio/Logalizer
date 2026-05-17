@@ -4,7 +4,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QTextStream>
-#include <QtLogging>
+#include <QtCore/QtLogging>
 
 FileWorker::FileWorker(const QString& fileName, int fileId, QObject* parent)
     : QObject(parent), m_fileName(fileName), m_fileId(fileId) {}

@@ -5,7 +5,7 @@
 #include <QProcess>
 #include <QStringList>
 #include <QThread>
-#include <QtLogging>
+#include <QtCore/QtLogging>
 
 ProcessWorker::ProcessWorker(const QString& command, int fileId, QObject* parent)
     : QObject(parent), m_command(command), m_fileId(fileId)

@@ -29,7 +29,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWheelEvent>
-#include <QtLogging>
+#include <QtCore/QtLogging>
 
 #include <algorithm>
 

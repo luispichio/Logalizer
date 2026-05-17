@@ -4,7 +4,7 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStringList>
-#include <QtLogging>
+#include <QtCore/QtLogging>
 
 namespace {
 QString escapedLikePattern(const QString& word) {

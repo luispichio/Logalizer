@@ -17,7 +17,7 @@
 #include <QAction>
 #include <QSettings>
 #include <QVBoxLayout>
-#include <QtLogging>
+#include <QtCore/QtLogging>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
