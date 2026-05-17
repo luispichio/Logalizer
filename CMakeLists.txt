@@ -41,8 +41,9 @@ configure_file(
 )
 
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets LinguistTools)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets LinguistTools Sql)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Sql)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Sql)
+find_package(Qt${QT_VERSION_MAJOR} OPTIONAL_COMPONENTS LinguistTools)
 
 set(TS_FILES Logalizer_en_001.ts)
 
@@ -65,7 +66,9 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         logdatabase.h logdatabase.cpp
     )
 
-    qt_create_translation(QM_FILES ${CMAKE_SOURCE_DIR} ${TS_FILES})
+    if(TARGET Qt${QT_VERSION_MAJOR}::lrelease)
+        qt_create_translation(QM_FILES ${CMAKE_SOURCE_DIR} ${TS_FILES})
+    endif()
 else()
     if(ANDROID)
         add_library(Logalizer SHARED
@@ -77,7 +80,9 @@ else()
         )
     endif()
 
-    qt5_create_translation(QM_FILES ${CMAKE_SOURCE_DIR} ${TS_FILES})
+    if(TARGET Qt${QT_VERSION_MAJOR}::lrelease)
+        qt5_create_translation(QM_FILES ${CMAKE_SOURCE_DIR} ${TS_FILES})
+    endif()
 endif()
 
 target_link_libraries(Logalizer PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)

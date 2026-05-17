@@ -30,6 +30,12 @@ require_command cpack
 
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
+find "$BUILD_DIR" -maxdepth 1 -type f \( \
+    -name "*.deb" -o \
+    -name "*.rpm" -o \
+    -name "*.tar.gz" -o \
+    -name "*.AppImage" \
+\) -delete
 
 (
     cd "$BUILD_DIR"

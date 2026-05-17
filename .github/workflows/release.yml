@@ -35,6 +35,8 @@ jobs:
             file \
             libfuse2 \
             libgl1-mesa-dev \
+            libvulkan-dev \
+            libxkbcommon-dev \
             ninja-build \
             qt6-base-dev \
             qt6-tools-dev \
