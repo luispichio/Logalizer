@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # scripts/make-appimage.sh
 # Called by the CMake target 'package-appimage'.
-# Usage: make-appimage.sh <BUILD_DIR> <SOURCE_DIR> <QMAKE_PATH>
+# Usage: make-appimage.sh <BUILD_DIR> <SOURCE_DIR> <QMAKE_PATH> <VERSION>
 set -e
 
 BUILD_DIR="$1"
 SOURCE_DIR="$2"
 QMAKE="$3"
+VERSION="$4"
 
 APPDIR="$BUILD_DIR/AppDir"
 TOOLS="$SOURCE_DIR/tools"
@@ -15,6 +16,8 @@ LINUXDEPLOYQT="$TOOLS/linuxdeployqt.AppImage"
 echo "=== Logalizer AppImage builder ==="
 echo "Build dir : $BUILD_DIR"
 echo "qmake     : $QMAKE"
+echo "version   : $VERSION"
+rm -f "$BUILD_DIR"/*.AppImage
 
 # ── 1. Download linuxdeployqt if missing ─────────────────────────────────────
 if [ ! -f "$LINUXDEPLOYQT" ]; then
@@ -66,7 +69,7 @@ cp "$APPDIR/usr/share/icons/hicolor/256x256/apps/logalizer.png" "$APPDIR/"
 
 export LD_LIBRARY_PATH="$DUMMY_DIR:$LD_LIBRARY_PATH"
 
-export VERSION=$(git rev-parse --short HEAD)
+export VERSION
 
 "$LINUXDEPLOYQT" \
     "$APPDIR/usr/bin/Logalizer" \
@@ -79,7 +82,9 @@ export VERSION=$(git rev-parse --short HEAD)
 # Cleanup dummy
 rm -rf "$DUMMY_DIR"
 
+find "$BUILD_DIR" -maxdepth 1 -type f -name "*.AppImage" ! -name "logalizer-$VERSION-x86_64.AppImage" \
+    -exec mv -f {} "$BUILD_DIR/logalizer-$VERSION-x86_64.AppImage" \;
+
 echo ""
 echo "=== AppImage ready ==="
-ls -lh "$BUILD_DIR"/Logalizer*.AppImage 2>/dev/null || \
 ls -lh "$BUILD_DIR"/*.AppImage 2>/dev/null

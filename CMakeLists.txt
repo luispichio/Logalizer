@@ -189,6 +189,7 @@ add_custom_target(package-appimage
         ${CMAKE_BINARY_DIR}
         ${CMAKE_SOURCE_DIR}
         ${QT_QMAKE_EXECUTABLE}
+        ${CPACK_PACKAGE_VERSION}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     DEPENDS Logalizer
     COMMENT "Generating AppImage (bundles Qt ${Qt${QT_VERSION_MAJOR}_VERSION})..."
