@@ -87,6 +87,10 @@ private:
     void setPointer(int p, bool force = false, bool backwards = false);
     void fillBuffer();
     void applyBufferToView();
+    void loadSettings();
+    void saveSettings() const;
+    void loadComboHistory(QComboBox* combo, QStringList& history, const QString& settingsKey);
+    void rememberComboText(QComboBox* combo, QStringList& history, const QString& settingsKey);
 
     QString m_filePath;
     int m_fileId;
@@ -102,9 +106,10 @@ private:
 
     QVBoxLayout* m_mainLayout = nullptr;
 
-    QLineEdit* m_searchEdit = nullptr;
+    QComboBox* m_searchCombo = nullptr;
     QPushButton* m_searchButton = nullptr;
     QLabel* m_searchStatus = nullptr;
+    QStringList m_ftsFilterHistory;
     QString m_ftsFilter;
 
     QWidget* m_textFindBar = nullptr;
@@ -122,8 +127,10 @@ private:
     QCheckBox* m_wrapCheck = nullptr;
     QCheckBox* m_showLineNumberCheck = nullptr;
     QCheckBox* m_jsonHelperCheck = nullptr;
-    QLineEdit* m_jsonFieldFilterEdit = nullptr;
+    QComboBox* m_jsonFieldFilterCombo = nullptr;
     QCheckBox* m_jsonCompactCheck = nullptr;
+    QCheckBox* m_jsonOnlyValuesCheck = nullptr;
+    QStringList m_jsonFieldFilterHistory;
     QScrollBar* m_logScrollBar = nullptr;
 
     QLabel* m_labelSize = nullptr;

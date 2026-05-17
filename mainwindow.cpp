@@ -15,6 +15,7 @@
 #include <QMessageBox>
 #include <QFileInfo>
 #include <QAction>
+#include <QSettings>
 #include <QVBoxLayout>
 #include <QtLogging>
 
@@ -24,7 +25,9 @@ MainWindow::MainWindow(QWidget *parent)
     setupUi();
 }
 
-MainWindow::~MainWindow() {}
+MainWindow::~MainWindow() {
+    saveSettings();
+}
 
 void MainWindow::setupUi() {
     setWindowTitle("Logalizer");
@@ -51,6 +54,8 @@ void MainWindow::setupUi() {
     openAction->setShortcut(QKeySequence::Open);
     connect(openAction, &QAction::triggered, this, &MainWindow::onOpenFile);
     fileMenu->addAction(openAction);
+
+    m_recentFilesMenu = fileMenu->addMenu("Recent Files");
 
     auto* runCommandAction = new QAction(QIcon::fromTheme("system-run"), "&Run Command...", this);
     runCommandAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
@@ -87,6 +92,8 @@ void MainWindow::setupUi() {
     m_memTimer->setInterval(2000);
     connect(m_memTimer, &QTimer::timeout, this, &MainWindow::updateMemoryLabel);
     m_memTimer->start();
+
+    loadSettings();
 }
 
 void MainWindow::updateMemoryLabel() {
@@ -135,6 +142,8 @@ void MainWindow::openFile(const QString& filePath) {
 
     auto* widget = new LogWidget(filePath, fileId, this);
 
+    addRecentFile(filePath);
+
     QFileInfo fi(filePath);
     int tabIndex = m_tabWidget->addTab(widget, fi.fileName());
     m_tabWidget->setCurrentIndex(tabIndex);
@@ -142,6 +151,75 @@ void MainWindow::openFile(const QString& filePath) {
 
     statusBar()->showMessage(QString("Opened: %1").arg(filePath), 5000);
     qInfo() << "MainWindow: Opened file" << filePath << "as file_id" << fileId;
+}
+
+void MainWindow::loadSettings() {
+    QSettings settings("Logalizer", "Logalizer");
+    m_recentFiles = settings.value("mainWindow/recentFiles").toStringList();
+    m_recentFiles.removeAll(QString());
+    while (m_recentFiles.size() > 15) {
+        m_recentFiles.removeLast();
+    }
+    rebuildRecentFilesMenu();
+}
+
+void MainWindow::saveSettings() const {
+    QSettings settings("Logalizer", "Logalizer");
+    settings.setValue("mainWindow/recentFiles", m_recentFiles);
+}
+
+void MainWindow::addRecentFile(const QString& filePath) {
+    const QString cleanPath = QFileInfo(filePath).absoluteFilePath();
+    if (cleanPath.isEmpty()) {
+        return;
+    }
+
+    m_recentFiles.removeAll(cleanPath);
+    m_recentFiles.prepend(cleanPath);
+    while (m_recentFiles.size() > 15) {
+        m_recentFiles.removeLast();
+    }
+    rebuildRecentFilesMenu();
+    saveSettings();
+}
+
+void MainWindow::rebuildRecentFilesMenu() {
+    if (!m_recentFilesMenu) {
+        return;
+    }
+
+    m_recentFilesMenu->clear();
+    for (const QString& path : m_recentFiles) {
+        const QFileInfo fi(path);
+        auto* action = m_recentFilesMenu->addAction(fi.fileName().isEmpty() ? path : fi.fileName());
+        action->setToolTip(path);
+        action->setData(path);
+        connect(action, &QAction::triggered, this, [this, path]() {
+            if (!QFileInfo::exists(path)) {
+                statusBar()->showMessage(QString("Recent file not found: %1").arg(path), 5000);
+                m_recentFiles.removeAll(path);
+                rebuildRecentFilesMenu();
+                saveSettings();
+                return;
+            }
+            openFile(path);
+        });
+    }
+
+    if (!m_recentFiles.isEmpty()) {
+        m_recentFilesMenu->addSeparator();
+    }
+
+    auto* clearAction = m_recentFilesMenu->addAction("Clear Recent Files");
+    clearAction->setEnabled(!m_recentFiles.isEmpty());
+    connect(clearAction, &QAction::triggered, this, [this]() { clearRecentFiles(); });
+}
+
+void MainWindow::clearRecentFiles() {
+    m_recentFiles.clear();
+    rebuildRecentFilesMenu();
+    saveSettings();
+    statusBar()->showMessage("Recent files cleared", 3000);
 }
 
 void MainWindow::openStdin() {

@@ -23,6 +23,7 @@
 #include <QRegularExpression>
 #include <QScrollBar>
 #include <QShortcut>
+#include <QSettings>
 #include <QTextBrowser>
 #include <QTextEdit>
 #include <QTimer>
@@ -99,6 +100,7 @@ LogWidget::LogWidget(SourceType sourceType, const QString& displayName, int file
 }
 
 LogWidget::~LogWidget() {
+    saveSettings();
     m_refreshTimer->stop();
     if (m_worker) {
         m_worker->stop();
@@ -145,12 +147,14 @@ void LogWidget::setupUi() {
         ftsBar->setContentsMargins(2, 2, 2, 2);
         ftsBar->setSpacing(4);
         ftsBar->addWidget(new QLabel("Filter:", viewContainer));
-        m_searchEdit = new QLineEdit(viewContainer);
-        m_searchEdit->setPlaceholderText("Filter lines with FTS5... (Enter)");
-        m_searchEdit->setToolTip("Filter indexed log lines with an FTS5 expression");
-        m_searchEdit->setMinimumWidth(420);
-        m_searchEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        ftsBar->addWidget(m_searchEdit, 1);
+        m_searchCombo = new QComboBox(viewContainer);
+        m_searchCombo->setEditable(true);
+        m_searchCombo->setInsertPolicy(QComboBox::NoInsert);
+        m_searchCombo->setMinimumWidth(420);
+        m_searchCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        m_searchCombo->lineEdit()->setPlaceholderText("Filter lines with FTS5... (Enter)");
+        m_searchCombo->setToolTip("Filter indexed log lines with an FTS5 expression");
+        ftsBar->addWidget(m_searchCombo, 1);
         m_searchButton = new QPushButton("Apply", viewContainer);
         ftsBar->addWidget(m_searchButton);
 
@@ -164,7 +168,8 @@ void LogWidget::setupUi() {
         viewLayout->addLayout(ftsBlock);
 
         connect(m_searchButton, &QPushButton::clicked, this, &LogWidget::onApplyFilters);
-        connect(m_searchEdit, &QLineEdit::returnPressed, this, &LogWidget::onApplyFilters);
+        connect(m_searchCombo->lineEdit(), &QLineEdit::returnPressed, this, &LogWidget::onApplyFilters);
+        connect(m_searchCombo, QOverload<int>::of(&QComboBox::activated), this, [this](int) { onApplyFilters(); });
 
         auto* jsonBar = new QHBoxLayout();
         jsonBar->setContentsMargins(2, 0, 2, 2);
@@ -179,20 +184,32 @@ void LogWidget::setupUi() {
         m_jsonCompactCheck->setChecked(true);
         jsonBar->addWidget(m_jsonCompactCheck);
 
+        m_jsonOnlyValuesCheck = new QCheckBox("Only values", viewContainer);
+        m_jsonOnlyValuesCheck->setToolTip("Show only JSON values, without field names");
+        jsonBar->addWidget(m_jsonOnlyValuesCheck);
+
         jsonBar->addWidget(new QLabel("Fields:", viewContainer));
 
-        m_jsonFieldFilterEdit = new QLineEdit(viewContainer);
-        m_jsonFieldFilterEdit->setPlaceholderText("level,msg,user.id,-metadata.*");
-        m_jsonFieldFilterEdit->setToolTip("Include fields by name/path, exclude with '-', wildcard prefixes with .*.");
-        m_jsonFieldFilterEdit->setMinimumWidth(420);
-        m_jsonFieldFilterEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        jsonBar->addWidget(m_jsonFieldFilterEdit, 1);
+        m_jsonFieldFilterCombo = new QComboBox(viewContainer);
+        m_jsonFieldFilterCombo->setEditable(true);
+        m_jsonFieldFilterCombo->setInsertPolicy(QComboBox::NoInsert);
+        m_jsonFieldFilterCombo->setMinimumWidth(420);
+        m_jsonFieldFilterCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        m_jsonFieldFilterCombo->lineEdit()->setPlaceholderText("level,msg,user.id,-metadata.*");
+        m_jsonFieldFilterCombo->setToolTip("Include fields by name/path, exclude with '-', wildcard prefixes with .*.");
+        jsonBar->addWidget(m_jsonFieldFilterCombo, 1);
 
         viewLayout->addLayout(jsonBar);
 
-        connect(m_jsonHelperCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); });
-        connect(m_jsonFieldFilterEdit, &QLineEdit::textChanged, this, [this]() { applyBufferToView(); });
-        connect(m_jsonCompactCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); });
+        connect(m_jsonHelperCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); saveSettings(); });
+        connect(m_jsonFieldFilterCombo->lineEdit(), &QLineEdit::textChanged, this, [this]() { applyBufferToView(); });
+        connect(m_jsonFieldFilterCombo->lineEdit(), &QLineEdit::editingFinished, this, [this]() {
+            rememberComboText(m_jsonFieldFilterCombo, m_jsonFieldFilterHistory, "logWidget/jsonFieldFilterHistory");
+            saveSettings();
+        });
+        connect(m_jsonFieldFilterCombo, QOverload<int>::of(&QComboBox::activated), this, [this](int) { applyBufferToView(); });
+        connect(m_jsonCompactCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); saveSettings(); });
+        connect(m_jsonOnlyValuesCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); saveSettings(); });
 
         m_textFindBar = new QWidget(this);
         m_textFindBar->setVisible(true);
@@ -258,7 +275,7 @@ void LogWidget::setupUi() {
         viewLayout->addLayout(toolBar);
 
         connect(m_wrapCheck, &QCheckBox::toggled, this, &LogWidget::onWrapToggled);
-        connect(m_showLineNumberCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); });
+        connect(m_showLineNumberCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); saveSettings(); });
 
         connect(m_textFindCombo->lineEdit(), &QLineEdit::returnPressed, this, &LogWidget::onTextFindSearch);
         connect(m_textFindCombo->lineEdit(), &QLineEdit::textChanged, this, [this]() {
@@ -335,6 +352,8 @@ void LogWidget::setupUi() {
         statusBar->addWidget(m_progressBar);
         m_mainLayout->addLayout(statusBar);
     }
+
+    loadSettings();
 }
 
 void LogWidget::onProgressUpdate(int fileId, qint64 bytesProcessed, qint64 totalBytes, qint32 linesProcessed) {
@@ -399,16 +418,18 @@ void LogWidget::onError(int fileId, QString message) {
 }
 
 void LogWidget::onApplyFilters() {
-    const QString query = m_searchEdit ? m_searchEdit->text().trimmed() : QString();
+    const QString query = m_searchCombo ? m_searchCombo->currentText().trimmed() : QString();
     if (query.isEmpty()) {
         m_ftsFilter.clear();
         if (m_searchStatus) {
             m_searchStatus->setText("");
         }
+        saveSettings();
         setPointer(0, true);
         return;
     }
 
+    rememberComboText(m_searchCombo, m_ftsFilterHistory, "logWidget/ftsFilterHistory");
     m_ftsFilter = query;
     const int line = LogDatabase::instance().findMatchLine(m_fileId, QString(), query, 0, false);
     if (line < 0) {
@@ -423,10 +444,12 @@ void LogWidget::onApplyFilters() {
         m_searchStatus->setText(QString("Filter active from line %1").arg(line + 1));
     }
     setPointer(line, true);
+    saveSettings();
 }
 
 void LogWidget::onWrapToggled(bool checked) {
     m_textBrowser->setLineWrapMode(checked ? QTextEdit::WidgetWidth : QTextEdit::NoWrap);
+    saveSettings();
     QTimer::singleShot(0, this, [this]() { setPointer(m_bufferPointer, true); });
 }
 
@@ -615,6 +638,15 @@ QString LogWidget::formatJsonLine(const QString& raw, const QMap<QString, int>& 
         return raw;
     }
 
+    if (m_jsonOnlyValuesCheck && m_jsonOnlyValuesCheck->isChecked()) {
+        QStringList values;
+        values.reserve(fields.size());
+        for (const auto& field : fields) {
+            values << field.second;
+        }
+        return values.join("  ");
+    }
+
     if (!m_jsonCompactCheck || !m_jsonCompactCheck->isChecked()) {
         return jsonFilterToCompactObject(fields);
     }
@@ -704,12 +736,12 @@ QString LogWidget::jsonFilterToCompactObject(const QVector<QPair<QString, QStrin
 }
 
 QStringList LogWidget::jsonFilterTokens(bool excludes) const {
-    if (!m_jsonFieldFilterEdit) {
+    if (!m_jsonFieldFilterCombo) {
         return {};
     }
 
     QStringList tokens;
-    for (QString token : splitJsonFilterTokens(m_jsonFieldFilterEdit->text())) {
+    for (QString token : splitJsonFilterTokens(m_jsonFieldFilterCombo->currentText())) {
         const bool isExclude = token.startsWith('-');
         if (isExclude) {
             token.remove(0, 1);
@@ -813,6 +845,102 @@ QStringList LogWidget::currentFindWords() const {
     return words;
 }
 
+void LogWidget::loadSettings() {
+    QSettings settings("Logalizer", "Logalizer");
+
+    loadComboHistory(m_searchCombo, m_ftsFilterHistory, "logWidget/ftsFilterHistory");
+    loadComboHistory(m_jsonFieldFilterCombo, m_jsonFieldFilterHistory, "logWidget/jsonFieldFilterHistory");
+    loadComboHistory(m_textFindCombo, m_textFindHistory, "logWidget/textFindHistory");
+
+    if (m_wrapCheck) {
+        m_wrapCheck->setChecked(settings.value("logWidget/wrap", false).toBool());
+    }
+    if (m_showLineNumberCheck) {
+        m_showLineNumberCheck->setChecked(settings.value("logWidget/showLineNumbers", true).toBool());
+    }
+    if (m_jsonHelperCheck) {
+        m_jsonHelperCheck->setChecked(settings.value("logWidget/jsonEnabled", false).toBool());
+    }
+    if (m_jsonCompactCheck) {
+        m_jsonCompactCheck->setChecked(settings.value("logWidget/jsonCompact", true).toBool());
+    }
+    if (m_jsonOnlyValuesCheck) {
+        m_jsonOnlyValuesCheck->setChecked(settings.value("logWidget/jsonOnlyValues", false).toBool());
+    }
+    if (m_jsonFieldFilterCombo) {
+        m_jsonFieldFilterCombo->setCurrentText(settings.value("logWidget/jsonFieldFilter", QString()).toString());
+    }
+}
+
+void LogWidget::saveSettings() const {
+    QSettings settings("Logalizer", "Logalizer");
+
+    if (m_wrapCheck) {
+        settings.setValue("logWidget/wrap", m_wrapCheck->isChecked());
+    }
+    if (m_showLineNumberCheck) {
+        settings.setValue("logWidget/showLineNumbers", m_showLineNumberCheck->isChecked());
+    }
+    if (m_jsonHelperCheck) {
+        settings.setValue("logWidget/jsonEnabled", m_jsonHelperCheck->isChecked());
+    }
+    if (m_jsonCompactCheck) {
+        settings.setValue("logWidget/jsonCompact", m_jsonCompactCheck->isChecked());
+    }
+    if (m_jsonOnlyValuesCheck) {
+        settings.setValue("logWidget/jsonOnlyValues", m_jsonOnlyValuesCheck->isChecked());
+    }
+    if (m_jsonFieldFilterCombo) {
+        settings.setValue("logWidget/jsonFieldFilter", m_jsonFieldFilterCombo->currentText().trimmed());
+    }
+    settings.setValue("logWidget/ftsFilterHistory", m_ftsFilterHistory);
+    settings.setValue("logWidget/jsonFieldFilterHistory", m_jsonFieldFilterHistory);
+    settings.setValue("logWidget/textFindHistory", m_textFindHistory);
+}
+
+void LogWidget::loadComboHistory(QComboBox* combo, QStringList& history, const QString& settingsKey) {
+    if (!combo) {
+        return;
+    }
+
+    QSettings settings("Logalizer", "Logalizer");
+    history = settings.value(settingsKey).toStringList();
+    history.removeAll(QString());
+
+    combo->blockSignals(true);
+    const QString current = combo->currentText();
+    combo->clear();
+    combo->addItems(history);
+    combo->setCurrentText(current);
+    combo->blockSignals(false);
+}
+
+void LogWidget::rememberComboText(QComboBox* combo, QStringList& history, const QString& settingsKey) {
+    if (!combo) {
+        return;
+    }
+
+    const QString text = combo->currentText().trimmed();
+    if (text.isEmpty()) {
+        return;
+    }
+
+    history.removeAll(text);
+    history.prepend(text);
+    while (history.size() > 20) {
+        history.removeLast();
+    }
+
+    combo->blockSignals(true);
+    combo->clear();
+    combo->addItems(history);
+    combo->setCurrentText(text);
+    combo->blockSignals(false);
+
+    QSettings settings("Logalizer", "Logalizer");
+    settings.setValue(settingsKey, history);
+}
+
 void LogWidget::updateStatusLabel() {
     if (m_totalLines == 0 || m_buffer.isEmpty()) {
         m_labelState->setText(m_ftsFilter.isEmpty() ? "Rows 0-0 of 0" : "Filter: no rows at this position");
@@ -909,17 +1037,7 @@ void LogWidget::jumpToTextMatch(int fromLineNumber, bool backwards, const QStrin
         return;
     }
 
-    if (!m_textFindHistory.contains(query)) {
-        m_textFindHistory.prepend(query);
-        if (m_textFindHistory.size() > 20) {
-            m_textFindHistory.removeLast();
-        }
-        m_textFindCombo->blockSignals(true);
-        m_textFindCombo->clear();
-        m_textFindCombo->addItems(m_textFindHistory);
-        m_textFindCombo->setCurrentText(query);
-        m_textFindCombo->blockSignals(false);
-    }
+    rememberComboText(m_textFindCombo, m_textFindHistory, "logWidget/textFindHistory");
 
     const int boundedFrom = qBound(0, fromLineNumber, qMax(0, static_cast<int>(m_totalLines) - 1));
     const int line = LogDatabase::instance().findTextLine(m_fileId, m_ftsFilter, m_findWords, boundedFrom, backwards);
@@ -935,6 +1053,7 @@ void LogWidget::jumpToTextMatch(int fromLineNumber, bool backwards, const QStrin
     if (m_textFindStatus) {
         m_textFindStatus->setText(QString("Found line %1").arg(line + 1));
     }
+    saveSettings();
 }
 
 void LogWidget::onTextFindNext() {
