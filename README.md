@@ -138,7 +138,7 @@ scripts/package-release.sh
 
 El script compila en modo `Release`, genera los paquetes disponibles con CPack, crea el AppImage usando el target `package-appimage`, copia todo a `dist/` y escribe `dist/SHA256SUMS`.
 
-### Crear un release en GitHub desde la maquina local
+### Crear un release en GitHub
 
 Requiere GitHub CLI autenticado con `gh auth login`.
 
@@ -147,14 +147,13 @@ scripts/package-release.sh
 scripts/create-github-release.sh v0.2.47
 ```
 
-### Crear un release con GitHub Actions
+El ultimo numero de version corresponde al contador de commits usado por CPack. Para consultar el tag esperado antes de publicar:
 
 ```bash
-git tag v0.2.47
-git push origin v0.2.47
+git rev-list --count HEAD
 ```
 
-El workflow `.github/workflows/release.yml` genera los artefactos Linux y los publica en el release del tag.
+Si el comando devuelve `47`, el tag recomendado es `v0.2.47`.
 
 ## 🤝 Contribuir
 
