@@ -40,6 +40,8 @@ echo "Running linuxdeployqt..."
 cd "$BUILD_DIR"
 
 # Disable FUSE (required in some environments / containers)
+export APPIMAGE_EXTRACT_AND_RUN=1
+
 # linuxdeployqt fails if it detects Qt plugins with missing dependencies.
 # Since Qt6Sql is linked, it pulls all SQL drivers (MySQL, PSQL, ODBC, Mimer),
 # which fail ldd if client libraries are not installed on the system.

@@ -93,12 +93,17 @@ El sistema de packaging está integrado en CMake vía **CPack**. La versión del
 ### Prerrequisitos adicionales
 
 ```bash
-# Debian / Ubuntu (.deb)
-sudo apt install dpkg-dev
+# Debian / Ubuntu (.deb, .rpm, .tar.gz)
+sudo apt install dpkg-dev rpm
+
+# Debian / Ubuntu (flujo completo con AppImage)
+sudo apt install build-essential cmake ninja-build qt6-base-dev qt6-tools-dev libqt6sql6-sqlite wget file libfuse2
 
 # Fedora / openSUSE (.rpm)
 sudo dnf install rpm-build
 ```
+
+CPack puede generar paquetes `.rpm` desde Debian/Ubuntu si está instalado el paquete `rpm`. Las dependencias declaradas dentro del RPM deben seguir usando nombres válidos para distribuciones RPM.
 
 ### Generar `.deb`
 
@@ -124,6 +129,32 @@ cpack -G RPM
 cd build-release
 cpack -G TGZ
 ```
+
+### Generar todos los artefactos de release
+
+```bash
+scripts/package-release.sh
+```
+
+El script compila en modo `Release`, genera los paquetes disponibles con CPack, crea el AppImage usando el target `package-appimage`, copia todo a `dist/` y escribe `dist/SHA256SUMS`.
+
+### Crear un release en GitHub desde la maquina local
+
+Requiere GitHub CLI autenticado con `gh auth login`.
+
+```bash
+scripts/package-release.sh
+scripts/create-github-release.sh v0.2.47
+```
+
+### Crear un release con GitHub Actions
+
+```bash
+git tag v0.2.47
+git push origin v0.2.47
+```
+
+El workflow `.github/workflows/release.yml` genera los artefactos Linux y los publica en el release del tag.
 
 ## 🤝 Contribuir
 
