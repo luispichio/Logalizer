@@ -132,44 +132,14 @@ void LogWidget::setupUi() {
     connect(m_refreshTimer, &QTimer::timeout, this, &LogWidget::refreshData);
 
     {
-        auto* toolBar = new QHBoxLayout();
-        m_wrapCheck = new QCheckBox("Wrap", this);
-        m_wrapCheck->setToolTip("Toggle word wrap in text view");
-        toolBar->addWidget(m_wrapCheck);
-        m_showLineNumberCheck = new QCheckBox("Line #", this);
-        m_showLineNumberCheck->setToolTip("Show the line number prefix in the text view");
-        m_showLineNumberCheck->setChecked(true);
-        toolBar->addWidget(m_showLineNumberCheck);
-
-        m_jsonHelperCheck = new QCheckBox("JSON", this);
-        m_jsonHelperCheck->setToolTip("Parse visible JSON lines while rendering");
-        toolBar->addWidget(m_jsonHelperCheck);
-
-        m_jsonFieldFilterEdit = new QLineEdit(this);
-        m_jsonFieldFilterEdit->setPlaceholderText("Fields: level,msg,user.id,-metadata.*");
-        m_jsonFieldFilterEdit->setToolTip("Include fields by name/path, exclude with '-', wildcard prefixes with .*.");
-        m_jsonFieldFilterEdit->setMaximumWidth(320);
-        toolBar->addWidget(m_jsonFieldFilterEdit);
-
-        m_jsonCompactCheck = new QCheckBox("Compact", this);
-        m_jsonCompactCheck->setToolTip("Show JSON as compact key=value pairs aligned within the visible buffer");
-        m_jsonCompactCheck->setChecked(true);
-        toolBar->addWidget(m_jsonCompactCheck);
-
-        toolBar->addStretch();
-        m_mainLayout->addLayout(toolBar);
-        connect(m_wrapCheck, &QCheckBox::toggled, this, &LogWidget::onWrapToggled);
-        connect(m_showLineNumberCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); });
-        connect(m_jsonHelperCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); });
-        connect(m_jsonFieldFilterEdit, &QLineEdit::textChanged, this, [this]() { applyBufferToView(); });
-        connect(m_jsonCompactCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); });
-    }
-
-    {
         auto* viewContainer = new QWidget(this);
         auto* viewLayout = new QVBoxLayout(viewContainer);
         viewLayout->setContentsMargins(0, 0, 0, 0);
         viewLayout->setSpacing(2);
+
+        auto* ftsBlock = new QVBoxLayout();
+        ftsBlock->setContentsMargins(0, 0, 0, 0);
+        ftsBlock->setSpacing(0);
 
         auto* ftsBar = new QHBoxLayout();
         ftsBar->setContentsMargins(2, 2, 2, 2);
@@ -178,21 +148,60 @@ void LogWidget::setupUi() {
         m_searchEdit = new QLineEdit(viewContainer);
         m_searchEdit->setPlaceholderText("Filter lines with FTS5... (Enter)");
         m_searchEdit->setToolTip("Filter indexed log lines with an FTS5 expression");
+        m_searchEdit->setMinimumWidth(420);
+        m_searchEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         ftsBar->addWidget(m_searchEdit, 1);
         m_searchButton = new QPushButton("Apply", viewContainer);
         ftsBar->addWidget(m_searchButton);
+
+        ftsBlock->addLayout(ftsBar);
+
         m_searchStatus = new QLabel("", viewContainer);
-        m_searchStatus->setMinimumWidth(120);
-        ftsBar->addWidget(m_searchStatus);
-        viewLayout->addLayout(ftsBar);
+        m_searchStatus->setToolTip("FTS filter status");
+        m_searchStatus->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+        m_searchStatus->setStyleSheet("color:#6c757d;");
+
+        viewLayout->addLayout(ftsBlock);
 
         connect(m_searchButton, &QPushButton::clicked, this, &LogWidget::onApplyFilters);
         connect(m_searchEdit, &QLineEdit::returnPressed, this, &LogWidget::onApplyFilters);
 
+        auto* jsonBar = new QHBoxLayout();
+        jsonBar->setContentsMargins(2, 0, 2, 2);
+        jsonBar->setSpacing(6);
+
+        m_jsonHelperCheck = new QCheckBox("JSON", viewContainer);
+        m_jsonHelperCheck->setToolTip("Parse visible JSON lines while rendering");
+        jsonBar->addWidget(m_jsonHelperCheck);
+
+        m_jsonCompactCheck = new QCheckBox("Compact", viewContainer);
+        m_jsonCompactCheck->setToolTip("Show JSON as compact key=value pairs aligned within the visible buffer");
+        m_jsonCompactCheck->setChecked(true);
+        jsonBar->addWidget(m_jsonCompactCheck);
+
+        jsonBar->addWidget(new QLabel("Fields:", viewContainer));
+
+        m_jsonFieldFilterEdit = new QLineEdit(viewContainer);
+        m_jsonFieldFilterEdit->setPlaceholderText("level,msg,user.id,-metadata.*");
+        m_jsonFieldFilterEdit->setToolTip("Include fields by name/path, exclude with '-', wildcard prefixes with .*.");
+        m_jsonFieldFilterEdit->setMinimumWidth(420);
+        m_jsonFieldFilterEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        jsonBar->addWidget(m_jsonFieldFilterEdit, 1);
+
+        viewLayout->addLayout(jsonBar);
+
+        connect(m_jsonHelperCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); });
+        connect(m_jsonFieldFilterEdit, &QLineEdit::textChanged, this, [this]() { applyBufferToView(); });
+        connect(m_jsonCompactCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); });
+
         m_textFindBar = new QWidget(this);
         m_textFindBar->setVisible(true);
         {
-            auto* fl = new QHBoxLayout(m_textFindBar);
+            auto* findBlock = new QVBoxLayout(m_textFindBar);
+            findBlock->setContentsMargins(0, 0, 0, 0);
+            findBlock->setSpacing(0);
+
+            auto* fl = new QHBoxLayout();
             fl->setContentsMargins(2, 2, 2, 2);
             fl->setSpacing(4);
 
@@ -201,6 +210,7 @@ void LogWidget::setupUi() {
             m_textFindCombo = new QComboBox(m_textFindBar);
             m_textFindCombo->setEditable(true);
             m_textFindCombo->setInsertPolicy(QComboBox::NoInsert);
+            m_textFindCombo->setMinimumWidth(420);
             m_textFindCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
             m_textFindCombo->lineEdit()->setPlaceholderText("Find words in filtered lines... (Enter)");
             fl->addWidget(m_textFindCombo, 1);
@@ -224,11 +234,31 @@ void LogWidget::setupUi() {
             m_textFindClear = new QPushButton("✕ Clear", m_textFindBar);
             fl->addWidget(m_textFindClear);
 
+            findBlock->addLayout(fl);
+
             m_textFindStatus = new QLabel("", m_textFindBar);
-            m_textFindStatus->setMinimumWidth(80);
-            fl->addWidget(m_textFindStatus);
+            m_textFindStatus->setToolTip("Find status");
+            m_textFindStatus->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+            m_textFindStatus->setStyleSheet("color:#6c757d;");
         }
         viewLayout->addWidget(m_textFindBar);
+
+        auto* toolBar = new QHBoxLayout();
+        toolBar->setContentsMargins(2, 0, 2, 2);
+        toolBar->setSpacing(8);
+        toolBar->addWidget(new QLabel("View:", viewContainer));
+        m_wrapCheck = new QCheckBox("Wrap", viewContainer);
+        m_wrapCheck->setToolTip("Toggle word wrap in text view");
+        toolBar->addWidget(m_wrapCheck);
+        m_showLineNumberCheck = new QCheckBox("Line #", viewContainer);
+        m_showLineNumberCheck->setToolTip("Show the line number prefix in the text view");
+        m_showLineNumberCheck->setChecked(true);
+        toolBar->addWidget(m_showLineNumberCheck);
+        toolBar->addStretch();
+        viewLayout->addLayout(toolBar);
+
+        connect(m_wrapCheck, &QCheckBox::toggled, this, &LogWidget::onWrapToggled);
+        connect(m_showLineNumberCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); });
 
         connect(m_textFindCombo->lineEdit(), &QLineEdit::returnPressed, this, &LogWidget::onTextFindSearch);
         connect(m_textFindCombo->lineEdit(), &QLineEdit::textChanged, this, [this]() {
@@ -289,6 +319,10 @@ void LogWidget::setupUi() {
         statusBar->addWidget(new QLabel("Lines:", this));
         m_labelLines = new QLabel("0", this);
         statusBar->addWidget(m_labelLines);
+        statusBar->addSpacing(12);
+        statusBar->addWidget(m_searchStatus);
+        statusBar->addSpacing(12);
+        statusBar->addWidget(m_textFindStatus);
         statusBar->addSpacing(12);
 
         statusBar->addStretch();
