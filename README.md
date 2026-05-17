@@ -1,15 +1,46 @@
 # Logalizer
 
-Logalizer es una aplicación de escritorio para analizar archivos de logs con foco en abrir archivos grandes, navegar por líneas y buscar texto rápido. Está construida con **C++17**, **Qt6** y **SQLite + FTS5** en memoria.
+Logalizer es una aplicación de escritorio para analizar logs con foco en abrir archivos grandes, navegar por líneas y buscar texto rápido. Está construida con **C++17**, **Qt6 Widgets** y **SQLite + FTS5** en memoria.
 
 ## 🚀 Características Principales
 
-- **Búsqueda Full-Text con FTS5**: cada archivo abierto crea una única tabla FTS5 sobre `raw` para búsquedas rápidas.
+- **Múltiples fuentes**: permite abrir archivos, leer desde `stdin` y ejecutar comandos para analizar su salida.
+- **Búsqueda Full-Text con FTS5**: cada fuente crea una única tabla FTS5 sobre `raw` para búsquedas rápidas.
 - **Navegación por línea**: `rowid` representa el número de línea y permite mover el visor por puntero sin usar paginación por offset.
 - **Offset de archivo disponible**: cada línea conserva `file_position` como dato no indexado para usos posteriores.
 - **Multihilo y UI fluida**: la ingesta ocurre en un `QThread` con inserts por lotes y refresco con debounce para no bloquear la interfaz.
-- **Vista de texto enfocada**: el contenido se muestra en `QTextBrowser`, con wrap configurable, búsqueda FTS5 global y búsqueda local dentro del buffer visible (`Ctrl+F`, `F3`, `Shift+F3`).
-- **Aislamiento por pestaña**: cada archivo vive en su propia tabla in-memory y al cerrar la pestaña se libera inmediatamente.
+- **Vista de texto enfocada**: el contenido se muestra en `QTextBrowser`, con wrap configurable, números de línea opcionales, búsqueda FTS5 global y búsqueda local dentro del buffer visible (`Ctrl+F`, `F3`, `Shift+F3`).
+- **JSON Helper**: permite formatear líneas JSON visibles, filtrar campos por ruta, mostrar formato compacto `key=value` o solo valores.
+- **Historial persistente**: los filtros FTS5, filtros de campos JSON y búsquedas locales se guardan como combos editables.
+- **Últimos archivos**: el menú `File > Recent Files` conserva los últimos archivos abiertos sin reabrirlos automáticamente.
+- **Aislamiento por pestaña**: cada fuente vive en su propia tabla in-memory y al cerrar la pestaña se libera inmediatamente.
+
+## Uso Básico
+
+- `File > Open...`: abre uno o más archivos de log.
+- `File > Recent Files`: muestra los últimos archivos abiertos y permite limpiar la lista.
+- `File > Run Command...`: ejecuta un comando y analiza su salida.
+- `logalizer -` o `logalizer --stdin`: lee logs desde entrada estándar.
+- `Filter`: aplica una expresión FTS5 global sobre todo el contenido indexado.
+- `Find`: busca palabras dentro del conjunto filtrado y navega entre coincidencias.
+- `JSON`: activa ayuda visual para líneas JSON, con `Compact`, `Only values` y filtro de campos.
+
+## Configuración Persistente
+
+Logalizer usa `QSettings` para guardar preferencias de usuario. En Linux, Qt guarda esta configuración normalmente en:
+
+```text
+~/.config/Logalizer/Logalizer.conf
+```
+
+Actualmente se persiste:
+
+- Preferencias de visualización: wrap y números de línea.
+- Preferencias de JSON Helper: activación, formato compacto, only values y filtro de campos.
+- Historial de filtros FTS5.
+- Historial de filtros de campos JSON.
+- Historial de búsqueda local.
+- Lista de últimos archivos abiertos.
 
 ## 🛠️ Stack Tecnológico
 
@@ -22,12 +53,10 @@ Logalizer es una aplicación de escritorio para analizar archivos de logs con fo
 
 | Estado | Característica / Tarea | Descripción |
 |:---:|---|---|
-| ⏳ | **Resaltado de Búsqueda** | Integrar snippets o resaltado alineado a resultados FTS5. |
 | ⏳ | **Exportación de Resultados** | Exportar las filas filtradas/buscadas a JSONL o CSV. |
 | ⏳ | **Tests Unitarios** | Cobertura sobre consultas FTS5 y navegación en `LogDatabase`. |
-| ⏳ | **Guardar/Cargar Workspaces** | Guardar sesiones: archivos abiertos y posición de navegación. |
+| ⏳ | **Workspaces** | Guardar sesiones completas: archivos abiertos, posición de navegación y filtros activos. |
 | ⏳ | **Exportar Rangos** | Exportar rangos de líneas o resultados de búsqueda a JSONL o CSV. |
-| ⏳ | **Parser Genérico de Texto** | Soporte para logs no-JSON mediante expresiones regulares. |
 | ⏳ | **Cliente SFTP** | Conectarse a servidores remotos y descargar logs directamente. |
 | ⏳ | **Archivos comprimidos (.zip, .gz)** | Soporte para apertura de archivos comprimidos. |
 
