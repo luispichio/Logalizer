@@ -326,6 +326,12 @@ void LogWidget::onChunkInserted(int fileId, qint32 totalLinesInserted) {
 
     m_totalLines = totalLinesInserted;
     m_labelLines->setText(QString::number(totalLinesInserted));
+
+    if (m_buffer.isEmpty()) {
+        refreshData();
+        return;
+    }
+
     m_refreshTimer->start();
 }
 
@@ -387,6 +393,7 @@ void LogWidget::onApplyFilters() {
 
 void LogWidget::onWrapToggled(bool checked) {
     m_textBrowser->setLineWrapMode(checked ? QTextEdit::WidgetWidth : QTextEdit::NoWrap);
+    QTimer::singleShot(0, this, [this]() { setPointer(m_bufferPointer, true); });
 }
 
 void LogWidget::refreshData() {
@@ -807,7 +814,7 @@ bool LogWidget::eventFilter(QObject* obj, QEvent* event) {
     }
 
     if (event->type() == QEvent::Resize) {
-        setPointer(m_bufferPointer, true);
+        QTimer::singleShot(0, this, [this]() { setPointer(m_bufferPointer, true); });
         return QWidget::eventFilter(obj, event);
     }
 
@@ -826,6 +833,11 @@ bool LogWidget::eventFilter(QObject* obj, QEvent* event) {
     }
 
     return QWidget::eventFilter(obj, event);
+}
+
+void LogWidget::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    QTimer::singleShot(0, this, [this]() { setPointer(m_bufferPointer, true); });
 }
 
 void LogWidget::onToggleTextFindBar() {
