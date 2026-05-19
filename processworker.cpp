@@ -1,5 +1,6 @@
 #include "processworker.h"
 #include "logdatabase.h"
+#include "metadatapipeline.h"
 
 #include <QMetaObject>
 #include <QProcess>
@@ -127,6 +128,7 @@ void ProcessWorker::flushBatch() {
     }
 
     LogDatabase::instance().insertBatch(m_fileId, m_batch);
+    MetadataPipeline::instance().enqueueBatch(m_fileId, m_batch);
     m_batch.clear();
 
     emit chunkInserted(m_fileId, m_lineNumber);

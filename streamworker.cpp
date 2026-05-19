@@ -1,5 +1,6 @@
 #include "streamworker.h"
 #include "logdatabase.h"
+#include "metadatapipeline.h"
 
 #include <QIODevice>
 #include <QTextStream>
@@ -48,6 +49,7 @@ void StreamWorker::doWork() {
 
         if (batch.size() >= CHUNK_SIZE) {
             LogDatabase::instance().insertBatch(m_fileId, batch);
+            MetadataPipeline::instance().enqueueBatch(m_fileId, batch);
             batch.clear();
 
             emit chunkInserted(m_fileId, lineNumber);
@@ -57,6 +59,7 @@ void StreamWorker::doWork() {
 
     if (!batch.isEmpty()) {
         LogDatabase::instance().insertBatch(m_fileId, batch);
+        MetadataPipeline::instance().enqueueBatch(m_fileId, batch);
         emit chunkInserted(m_fileId, lineNumber);
     }
 

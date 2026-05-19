@@ -20,6 +20,10 @@ QString escapedLikePattern(const QString& word) {
     pattern += '%';
     return pattern;
 }
+
+int logLevelValue(LogLevel level) {
+    return static_cast<int>(level);
+}
 }
 
 LogDatabase& LogDatabase::instance() {
@@ -72,6 +76,19 @@ bool LogDatabase::createTable(int fileId) {
         return false;
     }
 
+    const QString createMeta = QString(
+        "CREATE TABLE IF NOT EXISTS %1 ("
+        "rowid INTEGER PRIMARY KEY, "
+        "timestamp_text TEXT, "
+        "timestamp_epoch_ms INTEGER, "
+        "level INTEGER NOT NULL DEFAULT 0)"
+    ).arg(metadataTableName(fileId));
+    if (!q.exec(createMeta)) {
+        qCritical() << "LogDatabase::createTable: metadata table failed:" << q.lastError().text()
+                    << "\nSQL:" << createMeta;
+        return false;
+    }
+
     m_activeFileIds.insert(fileId);
     qInfo() << "LogDatabase: Created FTS table for fileId" << fileId;
     return true;
@@ -86,6 +103,14 @@ bool LogDatabase::dropTable(int fileId) {
         QSqlQuery q(m_db);
         if (!q.exec(QString("DROP TABLE IF EXISTS %1").arg(tableName(fileId)))) {
             qCritical() << "LogDatabase::dropTable: fts drop failed:" << q.lastError().text();
+            ok = false;
+        }
+    }
+
+    {
+        QSqlQuery q(m_db);
+        if (!q.exec(QString("DROP TABLE IF EXISTS %1").arg(metadataTableName(fileId)))) {
+            qCritical() << "LogDatabase::dropTable: metadata drop failed:" << q.lastError().text();
             ok = false;
         }
     }
@@ -139,6 +164,44 @@ bool LogDatabase::insertBatch(int fileId, const QVector<LineRecord>& records) {
     return true;
 }
 
+bool LogDatabase::insertMetadataBatch(int fileId, const QVector<LineMetadataRecord>& records) {
+    QMutexLocker locker(&m_mutex);
+
+    if (records.isEmpty() || !m_activeFileIds.contains(fileId)) {
+        return true;
+    }
+
+    QString sql = QString("INSERT OR IGNORE INTO %1 (rowid, timestamp_text, timestamp_epoch_ms, level) VALUES (?, ?, ?, ?)")
+        .arg(metadataTableName(fileId));
+
+    if (!m_db.transaction()) {
+        qCritical() << "LogDatabase::insertMetadataBatch: transaction start failed:"
+                    << m_db.lastError().text();
+        return false;
+    }
+
+    QSqlQuery insertQ(m_db);
+    insertQ.prepare(sql);
+
+    for (const LineMetadataRecord& rec : records) {
+        insertQ.bindValue(0, rec.lineNumber + 1);
+        insertQ.bindValue(1, rec.timestampText);
+        insertQ.bindValue(2, rec.timestampEpochMs >= 0 ? QVariant(rec.timestampEpochMs) : QVariant());
+        insertQ.bindValue(3, logLevelValue(rec.level));
+        if (!insertQ.exec()) {
+            qWarning() << "LogDatabase: metadata insert failed:" << insertQ.lastError().text();
+        }
+    }
+
+    if (!m_db.commit()) {
+        qCritical() << "LogDatabase::insertMetadataBatch: commit failed:" << m_db.lastError().text();
+        m_db.rollback();
+        return false;
+    }
+
+    return true;
+}
+
 int LogDatabase::rowCount(int fileId) {
     QMutexLocker locker(&m_mutex);
     QSqlQuery q(m_db);
@@ -183,6 +246,11 @@ qint64 LogDatabase::totalDbUsedBytes() const {
 QSet<int> LogDatabase::activeFileIds() const {
     QMutexLocker locker(&m_mutex);
     return m_activeFileIds;
+}
+
+bool LogDatabase::isFileActive(int fileId) const {
+    QMutexLocker locker(&m_mutex);
+    return m_activeFileIds.contains(fileId);
 }
 
 bool LogDatabase::queryRows(int fileId, int firstLineNumber, int limit,

@@ -1,5 +1,6 @@
 #include "logwidget.h"
 #include "fileworker.h"
+#include "metadatapipeline.h"
 #include "processworker.h"
 #include "streamworker.h"
 
@@ -119,6 +120,7 @@ LogWidget::~LogWidget() {
             m_workerThread->wait(1000);
         }
     }
+    MetadataPipeline::instance().cancelFile(m_fileId);
     LogDatabase::instance().dropTable(m_fileId);
     qInfo() << "LogWidget: Cleaned up fileId" << m_fileId << m_filePath;
 }
