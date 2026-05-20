@@ -2,6 +2,7 @@
 #define LOGLINEPARSER_H
 
 #include "linerecord.h"
+#include "metadataconfig.h"
 
 #include <QString>
 #include <QStringView>
@@ -13,6 +14,7 @@ struct ParsedLineMetadata {
 };
 
 ParsedLineMetadata parseLineMetadata(QStringView line);
+ParsedLineMetadata parseLineMetadata(QStringView line, const MetadataDetectionConfig& config);
 QString logLevelToString(LogLevel level);
 
 #endif // LOGLINEPARSER_H

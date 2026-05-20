@@ -67,7 +67,11 @@ private:
     void setupUi();
     void refreshData();
     void updateStatusLabel();
+    void updateMetadataStatusLabel();
     QString buildRowHtml(const QVector<QString>& row, const QMap<QString, int>& jsonFieldWidths) const;
+    bool includeMetadataInRows() const;
+    bool sortByTimestamp() const;
+    int currentRowSpace() const;
     QString highlightFindWords(const QString& raw) const;
     QString formatJsonLine(const QString& raw, const QMap<QString, int>& jsonFieldWidths) const;
     QVector<QPair<QString, QString>> jsonFieldsForRaw(const QString& raw) const;
@@ -102,6 +106,7 @@ private:
     StreamWorker* m_streamWorker = nullptr;
 
     QTimer* m_refreshTimer = nullptr;
+    QTimer* m_metadataStatusTimer = nullptr;
     static constexpr int REFRESH_DEBOUNCE_MS = 1500;
 
     QVBoxLayout* m_mainLayout = nullptr;
@@ -126,6 +131,9 @@ private:
     QTextBrowser* m_textBrowser = nullptr;
     QCheckBox* m_wrapCheck = nullptr;
     QCheckBox* m_showLineNumberCheck = nullptr;
+    QCheckBox* m_showTimestampCheck = nullptr;
+    QCheckBox* m_showLogLevelCheck = nullptr;
+    QCheckBox* m_sortTimestampCheck = nullptr;
     QCheckBox* m_jsonHelperCheck = nullptr;
     QComboBox* m_jsonFieldFilterCombo = nullptr;
     QCheckBox* m_jsonCompactCheck = nullptr;
@@ -136,6 +144,7 @@ private:
     QLabel* m_labelSize = nullptr;
     QLabel* m_labelLines = nullptr;
     QLabel* m_labelState = nullptr;
+    QLabel* m_metadataStatus = nullptr;
     QProgressBar* m_progressBar = nullptr;
 
     int m_bufferPointer = 0;

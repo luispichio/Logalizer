@@ -23,8 +23,11 @@ public:
 
     bool queryRows(int fileId, int firstLineNumber, int limit,
                    const QString& ftsFilter,
+                   bool includeMetadata,
+                   bool sortByTimestamp,
                    QVector<QVector<QString>>& outRows,
                    QStringList& outHeaders);
+    int timestampRowCount(int fileId, const QString& ftsFilter);
 
     int findMatchLine(int fileId,
                       const QString& ftsFilter,

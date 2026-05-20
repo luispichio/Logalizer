@@ -1,6 +1,7 @@
 #include "loglineparser.h"
 
 #include <QDateTime>
+#include <QRegularExpressionMatch>
 #include <QtGlobal>
 
 namespace {
@@ -94,6 +95,69 @@ LogLevel detectLevel(QStringView line) {
         }
     }
 
+    return LogLevel::Unknown;
+}
+
+LogLevel levelFromText(const QString& text) {
+    const QString value = text.trimmed().toLower();
+    if (value == QLatin1String("trace") || value == QLatin1String("trc")) {
+        return LogLevel::Trace;
+    }
+    if (value == QLatin1String("debug") || value == QLatin1String("dbg")) {
+        return LogLevel::Debug;
+    }
+    if (value == QLatin1String("info") || value == QLatin1String("information") || value == QLatin1String("notice")) {
+        return LogLevel::Info;
+    }
+    if (value == QLatin1String("warn") || value == QLatin1String("warning")) {
+        return LogLevel::Warn;
+    }
+    if (value == QLatin1String("error") || value == QLatin1String("err")) {
+        return LogLevel::Error;
+    }
+    if (value == QLatin1String("fatal") || value == QLatin1String("critical")
+        || value == QLatin1String("panic") || value == QLatin1String("alert")
+        || value == QLatin1String("emergency")) {
+        return LogLevel::Fatal;
+    }
+    return LogLevel::Unknown;
+}
+
+QString detectTimestampByRegex(QStringView line, const MetadataDetectionConfig& config) {
+    if (config.timestampRules.isEmpty()) {
+        return QString();
+    }
+
+    const QString subject = line.left(qMin(line.size(), config.regexScanLimit)).toString();
+    for (const CompiledMetadataRegexRule& rule : config.timestampRules) {
+        const QRegularExpressionMatch match = rule.regex.match(subject);
+        if (!match.hasMatch()) {
+            continue;
+        }
+        const QString captured = match.captured(rule.captureGroup).trimmed();
+        if (!captured.isEmpty()) {
+            return captured;
+        }
+    }
+    return QString();
+}
+
+LogLevel detectLevelByRegex(QStringView line, const MetadataDetectionConfig& config) {
+    if (config.levelRules.isEmpty()) {
+        return LogLevel::Unknown;
+    }
+
+    const QString subject = line.left(qMin(line.size(), config.regexScanLimit)).toString();
+    for (const CompiledMetadataRegexRule& rule : config.levelRules) {
+        const QRegularExpressionMatch match = rule.regex.match(subject);
+        if (!match.hasMatch()) {
+            continue;
+        }
+        const LogLevel level = levelFromText(match.captured(rule.captureGroup));
+        if (level != LogLevel::Unknown) {
+            return level;
+        }
+    }
     return LogLevel::Unknown;
 }
 
@@ -238,10 +302,33 @@ qint64 epochFromText(const QString& timestampText) {
 }
 
 ParsedLineMetadata parseLineMetadata(QStringView line) {
+    static const MetadataDetectionConfig config = loadMetadataDetectionConfig();
+    return parseLineMetadata(line, config);
+}
+
+ParsedLineMetadata parseLineMetadata(QStringView line, const MetadataDetectionConfig& config) {
     ParsedLineMetadata metadata;
-    metadata.timestampText = detectTimestamp(line);
+    if (config.preferRegexRules) {
+        metadata.timestampText = detectTimestampByRegex(line, config);
+        metadata.level = detectLevelByRegex(line, config);
+    }
+
+    if (metadata.timestampText.isEmpty()) {
+        metadata.timestampText = detectTimestamp(line);
+    }
+    if (metadata.level == LogLevel::Unknown) {
+        metadata.level = detectLevel(line);
+    }
+    if (!config.preferRegexRules) {
+        if (metadata.timestampText.isEmpty()) {
+            metadata.timestampText = detectTimestampByRegex(line, config);
+        }
+        if (metadata.level == LogLevel::Unknown) {
+            metadata.level = detectLevelByRegex(line, config);
+        }
+    }
+
     metadata.timestampEpochMs = epochFromText(metadata.timestampText);
-    metadata.level = detectLevel(line);
     return metadata;
 }
 

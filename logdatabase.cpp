@@ -255,26 +255,89 @@ bool LogDatabase::isFileActive(int fileId) const {
 
 bool LogDatabase::queryRows(int fileId, int firstLineNumber, int limit,
                             const QString& ftsFilter,
+                            bool includeMetadata,
+                            bool sortByTimestamp,
                             QVector<QVector<QString>>& outRows,
                             QStringList& outHeaders) {
     QMutexLocker locker(&m_mutex);
 
     outRows.clear();
-    outHeaders = {"line_number", "file_position", "raw"};
+    outHeaders = includeMetadata || sortByTimestamp
+        ? QStringList{"line_number", "file_position", "timestamp_text", "timestamp_epoch_ms", "level", "raw"}
+        : QStringList{"line_number", "file_position", "raw"};
 
     QString table = tableName(fileId);
+    QString metaTable = metadataTableName(fileId);
     const QString filter = ftsFilter.trimmed();
     const bool hasFilter = !filter.isEmpty();
+    const int start = qMax(0, firstLineNumber);
+
+    if (sortByTimestamp) {
+        QString sql = hasFilter
+            ? QString(
+                  "SELECT l.rowid - 1 AS line_number, l.file_position, m.timestamp_text, "
+                  "m.timestamp_epoch_ms, m.level, l.raw FROM %1 m "
+                  "JOIN %2 l ON l.rowid = m.rowid "
+                  "WHERE m.timestamp_epoch_ms IS NOT NULL AND %2 MATCH ? "
+                  "ORDER BY m.timestamp_epoch_ms ASC, m.rowid ASC LIMIT ? OFFSET ?"
+              ).arg(metaTable, table)
+            : QString(
+                  "SELECT l.rowid - 1 AS line_number, l.file_position, m.timestamp_text, "
+                  "m.timestamp_epoch_ms, m.level, l.raw FROM %1 m "
+                  "JOIN %2 l ON l.rowid = m.rowid "
+                  "WHERE m.timestamp_epoch_ms IS NOT NULL "
+                  "ORDER BY m.timestamp_epoch_ms ASC, m.rowid ASC LIMIT ? OFFSET ?"
+              ).arg(metaTable, table);
+
+        QSqlQuery q(m_db);
+        q.prepare(sql);
+        if (hasFilter) {
+            q.addBindValue(filter);
+        }
+        q.addBindValue(limit);
+        q.addBindValue(start);
+
+        if (!q.exec()) {
+            qWarning() << "LogDatabase::queryRows: timestamp sort failed:" << q.lastError().text()
+                       << "\nSQL:" << sql;
+            return false;
+        }
+
+        while (q.next()) {
+            QVector<QString> row;
+            row.reserve(outHeaders.size());
+            for (int i = 0; i < outHeaders.size(); ++i) {
+                row << q.value(i).toString();
+            }
+            outRows << row;
+        }
+
+        return true;
+    }
 
     QString sql = hasFilter
-        ? QString(
-              "SELECT rowid - 1 AS line_number, file_position, raw FROM %1 "
-              "WHERE %1 MATCH ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?"
-          ).arg(table)
-        : QString(
-              "SELECT rowid - 1 AS line_number, file_position, raw FROM %1 "
-              "WHERE rowid >= ? ORDER BY rowid ASC LIMIT ?"
-          ).arg(table);
+        ? (includeMetadata
+            ? QString(
+                  "SELECT l.rowid - 1 AS line_number, l.file_position, m.timestamp_text, "
+                  "m.timestamp_epoch_ms, m.level, l.raw FROM %1 l "
+                  "LEFT JOIN %2 m ON m.rowid = l.rowid "
+                  "WHERE %1 MATCH ? AND l.rowid >= ? ORDER BY l.rowid ASC LIMIT ?"
+              ).arg(table, metaTable)
+            : QString(
+                  "SELECT rowid - 1 AS line_number, file_position, raw FROM %1 "
+                  "WHERE %1 MATCH ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?"
+              ).arg(table))
+        : (includeMetadata
+            ? QString(
+                  "SELECT l.rowid - 1 AS line_number, l.file_position, m.timestamp_text, "
+                  "m.timestamp_epoch_ms, m.level, l.raw FROM %1 l "
+                  "LEFT JOIN %2 m ON m.rowid = l.rowid "
+                  "WHERE l.rowid >= ? ORDER BY l.rowid ASC LIMIT ?"
+              ).arg(table, metaTable)
+            : QString(
+                  "SELECT rowid - 1 AS line_number, file_position, raw FROM %1 "
+                  "WHERE rowid >= ? ORDER BY rowid ASC LIMIT ?"
+              ).arg(table));
 
     QSqlQuery q(m_db);
     q.prepare(sql);
@@ -300,6 +363,35 @@ bool LogDatabase::queryRows(int fileId, int firstLineNumber, int limit,
     }
 
     return true;
+}
+
+int LogDatabase::timestampRowCount(int fileId, const QString& ftsFilter) {
+    QMutexLocker locker(&m_mutex);
+
+    const QString table = tableName(fileId);
+    const QString metaTable = metadataTableName(fileId);
+    const QString filter = ftsFilter.trimmed();
+    const bool hasFilter = !filter.isEmpty();
+    const QString sql = hasFilter
+        ? QString(
+              "SELECT COUNT(*) FROM %1 m JOIN %2 l ON l.rowid = m.rowid "
+              "WHERE m.timestamp_epoch_ms IS NOT NULL AND %2 MATCH ?"
+          ).arg(metaTable, table)
+        : QString("SELECT COUNT(*) FROM %1 WHERE timestamp_epoch_ms IS NOT NULL").arg(metaTable);
+
+    QSqlQuery q(m_db);
+    q.prepare(sql);
+    if (hasFilter) {
+        q.addBindValue(filter);
+    }
+
+    if (q.exec() && q.next()) {
+        return q.value(0).toInt();
+    }
+
+    qWarning() << "LogDatabase::timestampRowCount: failed:" << q.lastError().text()
+               << "\nSQL:" << sql;
+    return 0;
 }
 
 int LogDatabase::findMatchLine(int fileId,

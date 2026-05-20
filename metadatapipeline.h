@@ -2,6 +2,7 @@
 #define METADATAPIPELINE_H
 
 #include "linerecord.h"
+#include "metadataconfig.h"
 
 #include <QAtomicInt>
 #include <QMutex>
@@ -10,6 +11,13 @@
 #include <QThread>
 #include <QThreadPool>
 #include <QVector>
+
+struct MetadataProgress {
+    qint64 queuedLines = 0;
+    qint64 processedLines = 0;
+    qint64 taggedLines = 0;
+    qint64 droppedLines = 0;
+};
 
 struct MetadataInputLine {
     QString raw;
@@ -25,7 +33,9 @@ public:
     void cancelFile(int fileId);
     void shutdown();
     void finishInputBatch(int lineCount);
-    void enqueueParsedBatch(int fileId, QVector<LineMetadataRecord>&& records);
+    void enqueueParsedBatch(int fileId, int processedLines, QVector<LineMetadataRecord>&& records);
+    MetadataProgress progress(int fileId) const;
+    void reloadConfig();
 
 private:
     MetadataPipeline();
@@ -38,9 +48,11 @@ private:
 
     QThreadPool m_parserPool;
     QThread m_writerThread;
-    QMutex m_mutex;
+    mutable QMutex m_mutex;
     QQueue<QPair<int, QVector<LineMetadataRecord>>> m_pendingWrites;
     QSet<int> m_cancelledFileIds;
+    QHash<int, MetadataProgress> m_progressByFile;
+    MetadataDetectionConfig m_detectionConfig;
     QAtomicInt m_pendingInputLines = 0;
     bool m_stopping = false;
 
