@@ -1,5 +1,6 @@
 #include "logwidget.h"
 #include "fileworker.h"
+#include "loglinestore.h"
 #include "metadatapipeline.h"
 #include "processworker.h"
 #include "streamworker.h"
@@ -126,6 +127,7 @@ LogWidget::~LogWidget() {
     }
     MetadataPipeline::instance().cancelFile(m_fileId);
     LogDatabase::instance().dropTable(m_fileId);
+    LogLineStoreRegistry::instance().unregisterStore(m_fileId);
     qInfo() << "LogWidget: Cleaned up fileId" << m_fileId << m_filePath;
 }
 
@@ -626,13 +628,14 @@ void LogWidget::applyBufferToView() {
     QMap<QString, int> jsonFieldWidths;
     if (m_jsonHelperCheck && m_jsonHelperCheck->isChecked()
         && m_jsonCompactCheck && m_jsonCompactCheck->isChecked()) {
-        const int rawIdx = m_bufferHeaders.indexOf("raw");
-        if (rawIdx >= 0) {
+        const int lineNumberIdx = m_bufferHeaders.indexOf("line_number");
+        const auto store = LogLineStoreRegistry::instance().store(m_fileId);
+        if (lineNumberIdx >= 0 && store) {
             for (const auto& row : m_buffer) {
-                if (rawIdx >= row.size()) {
+                if (lineNumberIdx >= row.size()) {
                     continue;
                 }
-                const auto fields = jsonFieldsForRaw(row[rawIdx]);
+                const auto fields = jsonFieldsForRaw(store->lineText(row[lineNumberIdx].toInt()));
                 for (const auto& field : fields) {
                     jsonFieldWidths[field.first] = qMax(jsonFieldWidths.value(field.first), field.first.size());
                 }
@@ -668,7 +671,6 @@ QString LogWidget::buildRowHtml(const QVector<QString>& row, const QMap<QString,
     const int lineNumberIdx = m_bufferHeaders.indexOf("line_number");
     const int timestampIdx = m_bufferHeaders.indexOf("timestamp_text");
     const int levelIdx = m_bufferHeaders.indexOf("level");
-    const int rawIdx = m_bufferHeaders.indexOf("raw");
 
     QStringList parts;
     if (m_showLineNumberCheck && m_showLineNumberCheck->isChecked() && lineNumberIdx >= 0 && lineNumberIdx < row.size()) {
@@ -713,9 +715,13 @@ QString LogWidget::buildRowHtml(const QVector<QString>& row, const QMap<QString,
         prefix += " <span style=\"color:#586e75;\">|</span> ";
     }
 
-    const QString display = (rawIdx >= 0 && rawIdx < row.size())
-        ? formatJsonLine(row[rawIdx], jsonFieldWidths)
-        : QString();
+    QString rawText;
+    if (lineNumberIdx >= 0 && lineNumberIdx < row.size()) {
+        if (const auto store = LogLineStoreRegistry::instance().store(m_fileId)) {
+            rawText = store->lineText(row[lineNumberIdx].toInt());
+        }
+    }
+    const QString display = formatJsonLine(rawText, jsonFieldWidths);
     const QString raw = highlightFindWords(display);
     return prefix + raw + "\n";
 }

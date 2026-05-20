@@ -263,8 +263,8 @@ bool LogDatabase::queryRows(int fileId, int firstLineNumber, int limit,
 
     outRows.clear();
     outHeaders = includeMetadata || sortByTimestamp
-        ? QStringList{"line_number", "file_position", "timestamp_text", "timestamp_epoch_ms", "level", "raw"}
-        : QStringList{"line_number", "file_position", "raw"};
+        ? QStringList{"line_number", "file_position", "timestamp_text", "timestamp_epoch_ms", "level"}
+        : QStringList{"line_number", "file_position"};
 
     QString table = tableName(fileId);
     QString metaTable = metadataTableName(fileId);
@@ -276,14 +276,14 @@ bool LogDatabase::queryRows(int fileId, int firstLineNumber, int limit,
         QString sql = hasFilter
             ? QString(
                   "SELECT l.rowid - 1 AS line_number, l.file_position, m.timestamp_text, "
-                  "m.timestamp_epoch_ms, m.level, l.raw FROM %1 m "
+                  "m.timestamp_epoch_ms, m.level FROM %1 m "
                   "JOIN %2 l ON l.rowid = m.rowid "
                   "WHERE m.timestamp_epoch_ms IS NOT NULL AND %2 MATCH ? "
                   "ORDER BY m.timestamp_epoch_ms ASC, m.rowid ASC LIMIT ? OFFSET ?"
               ).arg(metaTable, table)
             : QString(
                   "SELECT l.rowid - 1 AS line_number, l.file_position, m.timestamp_text, "
-                  "m.timestamp_epoch_ms, m.level, l.raw FROM %1 m "
+                  "m.timestamp_epoch_ms, m.level FROM %1 m "
                   "JOIN %2 l ON l.rowid = m.rowid "
                   "WHERE m.timestamp_epoch_ms IS NOT NULL "
                   "ORDER BY m.timestamp_epoch_ms ASC, m.rowid ASC LIMIT ? OFFSET ?"
@@ -319,23 +319,23 @@ bool LogDatabase::queryRows(int fileId, int firstLineNumber, int limit,
         ? (includeMetadata
             ? QString(
                   "SELECT l.rowid - 1 AS line_number, l.file_position, m.timestamp_text, "
-                  "m.timestamp_epoch_ms, m.level, l.raw FROM %1 l "
+                  "m.timestamp_epoch_ms, m.level FROM %1 l "
                   "LEFT JOIN %2 m ON m.rowid = l.rowid "
                   "WHERE %1 MATCH ? AND l.rowid >= ? ORDER BY l.rowid ASC LIMIT ?"
               ).arg(table, metaTable)
             : QString(
-                  "SELECT rowid - 1 AS line_number, file_position, raw FROM %1 "
+                  "SELECT rowid - 1 AS line_number, file_position FROM %1 "
                   "WHERE %1 MATCH ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?"
               ).arg(table))
         : (includeMetadata
             ? QString(
                   "SELECT l.rowid - 1 AS line_number, l.file_position, m.timestamp_text, "
-                  "m.timestamp_epoch_ms, m.level, l.raw FROM %1 l "
+                  "m.timestamp_epoch_ms, m.level FROM %1 l "
                   "LEFT JOIN %2 m ON m.rowid = l.rowid "
                   "WHERE l.rowid >= ? ORDER BY l.rowid ASC LIMIT ?"
               ).arg(table, metaTable)
             : QString(
-                  "SELECT rowid - 1 AS line_number, file_position, raw FROM %1 "
+                  "SELECT rowid - 1 AS line_number, file_position FROM %1 "
                   "WHERE rowid >= ? ORDER BY rowid ASC LIMIT ?"
               ).arg(table));
 

@@ -59,6 +59,7 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         fileworker.h fileworker.cpp
         processworker.h processworker.cpp
         streamworker.h streamworker.cpp
+        loglinestore.h loglinestore.cpp
         loglineparser.h loglineparser.cpp
         metadataconfig.h metadataconfig.cpp
         metadatapipeline.h metadatapipeline.cpp
