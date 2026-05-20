@@ -31,7 +31,6 @@ public:
     ~MmapLineStore() override;
 
     bool open(QString* errorMessage = nullptr);
-    bool appendLine(qint64 offset, qint32 length);
 
     int lineCount() const override;
     qint64 filePosition(int lineNumber) const override;
@@ -44,7 +43,6 @@ private:
     qint64 m_mappedSize = 0;
     QVector<qint64> m_offsets;
     QVector<qint32> m_lengths;
-    mutable QReadWriteLock m_lock;
 };
 
 class SpillLineStore final : public LogLineStore
@@ -65,8 +63,12 @@ private:
     QVector<qint64> m_offsets;
     QVector<qint64> m_positions;
     QVector<qint32> m_lengths;
+    mutable QHash<int, QByteArray> m_cache;
+    mutable QVector<int> m_cacheOrder;
     mutable QReadWriteLock m_lock;
     mutable QMutex m_ioMutex;
+
+    static constexpr int MaxCachedLines = 4096;
 };
 
 class LogLineStoreRegistry

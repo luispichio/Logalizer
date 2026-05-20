@@ -1,7 +1,6 @@
 #include "loglinestore.h"
 
 #include <QFile>
-#include <QReadLocker>
 #include <QWriteLocker>
 #include <QDebug>
 
@@ -40,23 +39,37 @@ bool MmapLineStore::open(QString* errorMessage) {
         }
         return false;
     }
-    return true;
-}
 
-bool MmapLineStore::appendLine(qint64 offset, qint32 length) {
-    QWriteLocker locker(&m_lock);
-    m_offsets.append(offset);
-    m_lengths.append(length);
+    qint64 lineStart = 0;
+    for (qint64 i = 0; i < m_mappedSize; ++i) {
+        if (m_mappedData[i] != '\n') {
+            continue;
+        }
+        qint64 lineEnd = i;
+        if (lineEnd > lineStart && m_mappedData[lineEnd - 1] == '\r') {
+            --lineEnd;
+        }
+        m_offsets.append(lineStart);
+        m_lengths.append(static_cast<qint32>(lineEnd - lineStart));
+        lineStart = i + 1;
+    }
+
+    if (lineStart < m_mappedSize) {
+        qint64 lineEnd = m_mappedSize;
+        if (lineEnd > lineStart && m_mappedData[lineEnd - 1] == '\r') {
+            --lineEnd;
+        }
+        m_offsets.append(lineStart);
+        m_lengths.append(static_cast<qint32>(lineEnd - lineStart));
+    }
     return true;
 }
 
 int MmapLineStore::lineCount() const {
-    QReadLocker locker(&m_lock);
     return m_offsets.size();
 }
 
 qint64 MmapLineStore::filePosition(int lineNumber) const {
-    QReadLocker locker(&m_lock);
     if (lineNumber < 0 || lineNumber >= m_offsets.size()) {
         return 0;
     }
@@ -64,7 +77,6 @@ qint64 MmapLineStore::filePosition(int lineNumber) const {
 }
 
 QByteArray MmapLineStore::lineBytes(int lineNumber) const {
-    QReadLocker locker(&m_lock);
     if (!m_mappedData || lineNumber < 0 || lineNumber >= m_offsets.size()) {
         return QByteArray();
     }
@@ -127,6 +139,14 @@ qint64 SpillLineStore::filePosition(int lineNumber) const {
 }
 
 QByteArray SpillLineStore::lineBytes(int lineNumber) const {
+    {
+        QReadLocker locker(&m_lock);
+        const auto it = m_cache.constFind(lineNumber);
+        if (it != m_cache.constEnd()) {
+            return it.value();
+        }
+    }
+
     qint64 offset = 0;
     qint32 length = 0;
     {
@@ -142,7 +162,21 @@ QByteArray SpillLineStore::lineBytes(int lineNumber) const {
     if (!m_file->seek(offset)) {
         return QByteArray();
     }
-    return m_file->read(length);
+    QByteArray bytes = m_file->read(length);
+
+    {
+        QWriteLocker locker(&m_lock);
+        if (!m_cache.contains(lineNumber)) {
+            m_cache.insert(lineNumber, bytes);
+            m_cacheOrder.append(lineNumber);
+            while (m_cacheOrder.size() > MaxCachedLines) {
+                const int evicted = m_cacheOrder.takeFirst();
+                m_cache.remove(evicted);
+            }
+        }
+    }
+
+    return bytes;
 }
 
 LogLineStoreRegistry& LogLineStoreRegistry::instance() {
