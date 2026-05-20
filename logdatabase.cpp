@@ -7,20 +7,6 @@
 #include <QtCore/QtLogging>
 
 namespace {
-QString escapedLikePattern(const QString& word) {
-    QString pattern;
-    pattern.reserve(word.size() + 2);
-    pattern += '%';
-    for (const QChar ch : word) {
-        if (ch == '\\' || ch == '%' || ch == '_') {
-            pattern += '\\';
-        }
-        pattern += ch;
-    }
-    pattern += '%';
-    return pattern;
-}
-
 int logLevelValue(LogLevel level) {
     return static_cast<int>(level);
 }
@@ -69,7 +55,7 @@ bool LogDatabase::createTable(int fileId) {
     QString table = tableName(fileId);
     QSqlQuery q(m_db);
 
-    QString createFts = QString("CREATE VIRTUAL TABLE IF NOT EXISTS %1 USING fts5(file_position UNINDEXED, raw)").arg(table);
+    QString createFts = QString("CREATE VIRTUAL TABLE IF NOT EXISTS %1 USING fts5(file_position UNINDEXED, raw, content='', columnsize=0)").arg(table);
     if (!q.exec(createFts)) {
         qCritical() << "LogDatabase::createTable: FTS5 failed:" << q.lastError().text()
                     << "\nSQL:" << createFts;
@@ -489,31 +475,27 @@ int LogDatabase::findTextLine(int fileId,
     const QString filter = ftsFilter.trimmed();
     const bool hasFilter = !filter.isEmpty();
     const QString table = tableName(fileId);
-    QStringList predicates;
-    predicates.reserve(cleanWords.size());
-    for (int i = 0; i < cleanWords.size(); ++i) {
-        predicates << "raw LIKE ? ESCAPE '\\'";
+    QStringList matchWords;
+    matchWords.reserve(cleanWords.size());
+    for (const QString& word : cleanWords) {
+        QString escaped = word;
+        escaped.replace('"', "\"\"");
+        matchWords << QString("\"%1\"").arg(escaped);
     }
 
     const QString directionPredicate = backwards ? "rowid <= ?" : "rowid >= ?";
     const QString order = backwards ? "DESC" : "ASC";
-    QString sql = QString("SELECT rowid - 1 FROM %1 WHERE ").arg(table);
-    if (hasFilter) {
-        sql += QString("%1 MATCH ? AND ").arg(table);
-    }
+    QString sql = QString("SELECT rowid - 1 FROM %1 WHERE %1 MATCH ? AND ").arg(table);
     sql += directionPredicate;
-    sql += " AND (" + predicates.join(" OR ") + ")";
     sql += QString(" ORDER BY rowid %1 LIMIT 1").arg(order);
 
     QSqlQuery q(m_db);
     q.prepare(sql);
-    if (hasFilter) {
-        q.addBindValue(filter);
-    }
+    const QString matchQuery = hasFilter
+        ? QString("(%1) AND (%2)").arg(filter, matchWords.join(" OR "))
+        : matchWords.join(" OR ");
+    q.addBindValue(matchQuery);
     q.addBindValue(qMax(1, fromLineNumber + 1));
-    for (const QString& word : cleanWords) {
-        q.addBindValue(escapedLikePattern(word));
-    }
 
     if (!q.exec()) {
         qWarning() << "LogDatabase::findTextLine: failed:" << q.lastError().text()
