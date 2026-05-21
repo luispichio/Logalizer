@@ -53,12 +53,24 @@ bool LogDatabase::createTable(int fileId) {
     QMutexLocker locker(&m_mutex);
 
     QString table = tableName(fileId);
+    QString indexTable = indexTableName(fileId);
     QSqlQuery q(m_db);
 
     QString createFts = QString("CREATE VIRTUAL TABLE IF NOT EXISTS %1 USING fts5(file_position UNINDEXED, raw, content='', columnsize=0)").arg(table);
     if (!q.exec(createFts)) {
         qCritical() << "LogDatabase::createTable: FTS5 failed:" << q.lastError().text()
                     << "\nSQL:" << createFts;
+        return false;
+    }
+
+    const QString createIndex = QString(
+        "CREATE TABLE IF NOT EXISTS %1 ("
+        "rowid INTEGER PRIMARY KEY, "
+        "file_position INTEGER NOT NULL)"
+    ).arg(indexTable);
+    if (!q.exec(createIndex)) {
+        qCritical() << "LogDatabase::createTable: index table failed:" << q.lastError().text()
+                    << "\nSQL:" << createIndex;
         return false;
     }
 
@@ -95,6 +107,14 @@ bool LogDatabase::dropTable(int fileId) {
 
     {
         QSqlQuery q(m_db);
+        if (!q.exec(QString("DROP TABLE IF EXISTS %1").arg(indexTableName(fileId)))) {
+            qCritical() << "LogDatabase::dropTable: index drop failed:" << q.lastError().text();
+            ok = false;
+        }
+    }
+
+    {
+        QSqlQuery q(m_db);
         if (!q.exec(QString("DROP TABLE IF EXISTS %1").arg(metadataTableName(fileId)))) {
             qCritical() << "LogDatabase::dropTable: metadata drop failed:" << q.lastError().text();
             ok = false;
@@ -121,7 +141,8 @@ bool LogDatabase::insertBatch(int fileId, const QVector<LineRecord>& records) {
         return true;
     }
 
-    QString sql = QString("INSERT OR IGNORE INTO %1 (rowid, file_position, raw) VALUES (?, ?, ?)").arg(tableName(fileId));
+    const QString ftsSql = QString("INSERT OR IGNORE INTO %1 (rowid, file_position, raw) VALUES (?, ?, ?)").arg(tableName(fileId));
+    const QString indexSql = QString("INSERT OR IGNORE INTO %1 (rowid, file_position) VALUES (?, ?)").arg(indexTableName(fileId));
 
     if (!m_db.transaction()) {
         qCritical() << "LogDatabase::insertBatch: transaction start failed:"
@@ -130,14 +151,23 @@ bool LogDatabase::insertBatch(int fileId, const QVector<LineRecord>& records) {
     }
 
     QSqlQuery insertQ(m_db);
-    insertQ.prepare(sql);
+    insertQ.prepare(ftsSql);
+    QSqlQuery indexQ(m_db);
+    indexQ.prepare(indexSql);
 
     for (const LineRecord& rec : records) {
-        insertQ.bindValue(0, rec.lineNumber + 1);
+        const int rowid = rec.lineNumber + 1;
+        insertQ.bindValue(0, rowid);
         insertQ.bindValue(1, rec.filePosition);
         insertQ.bindValue(2, rec.raw);
         if (!insertQ.exec()) {
             qWarning() << "LogDatabase: fts insert failed:" << insertQ.lastError().text();
+        }
+
+        indexQ.bindValue(0, rowid);
+        indexQ.bindValue(1, rec.filePosition);
+        if (!indexQ.exec()) {
+            qWarning() << "LogDatabase: index insert failed:" << indexQ.lastError().text();
         }
     }
 
@@ -191,7 +221,7 @@ bool LogDatabase::insertMetadataBatch(int fileId, const QVector<LineMetadataReco
 int LogDatabase::rowCount(int fileId) {
     QMutexLocker locker(&m_mutex);
     QSqlQuery q(m_db);
-    if (q.exec(QString("SELECT COUNT(*) FROM %1").arg(tableName(fileId))) && q.next()) {
+    if (q.exec(QString("SELECT COUNT(*) FROM %1").arg(indexTableName(fileId))) && q.next()) {
         return q.value(0).toInt();
     }
     return 0;
@@ -253,6 +283,7 @@ bool LogDatabase::queryRows(int fileId, int firstLineNumber, int limit,
         : QStringList{"line_number", "file_position"};
 
     QString table = tableName(fileId);
+    QString indexTable = indexTableName(fileId);
     QString metaTable = metadataTableName(fileId);
     const QString filter = ftsFilter.trimmed();
     const bool hasFilter = !filter.isEmpty();
@@ -261,19 +292,20 @@ bool LogDatabase::queryRows(int fileId, int firstLineNumber, int limit,
     if (sortByTimestamp) {
         QString sql = hasFilter
             ? QString(
-                  "SELECT l.rowid - 1 AS line_number, l.file_position, m.timestamp_text, "
+                  "SELECT i.rowid - 1 AS line_number, i.file_position, m.timestamp_text, "
                   "m.timestamp_epoch_ms, m.level FROM %1 m "
-                  "JOIN %2 l ON l.rowid = m.rowid "
-                  "WHERE m.timestamp_epoch_ms IS NOT NULL AND %2 MATCH ? "
+                  "JOIN %2 i ON i.rowid = m.rowid "
+                  "JOIN %3 f ON f.rowid = m.rowid "
+                  "WHERE m.timestamp_epoch_ms IS NOT NULL AND %3 MATCH ? "
                   "ORDER BY m.timestamp_epoch_ms ASC, m.rowid ASC LIMIT ? OFFSET ?"
-              ).arg(metaTable, table)
+              ).arg(metaTable, indexTable, table)
             : QString(
-                  "SELECT l.rowid - 1 AS line_number, l.file_position, m.timestamp_text, "
+                  "SELECT i.rowid - 1 AS line_number, i.file_position, m.timestamp_text, "
                   "m.timestamp_epoch_ms, m.level FROM %1 m "
-                  "JOIN %2 l ON l.rowid = m.rowid "
+                  "JOIN %2 i ON i.rowid = m.rowid "
                   "WHERE m.timestamp_epoch_ms IS NOT NULL "
                   "ORDER BY m.timestamp_epoch_ms ASC, m.rowid ASC LIMIT ? OFFSET ?"
-              ).arg(metaTable, table);
+              ).arg(metaTable, indexTable);
 
         QSqlQuery q(m_db);
         q.prepare(sql);
@@ -304,26 +336,28 @@ bool LogDatabase::queryRows(int fileId, int firstLineNumber, int limit,
     QString sql = hasFilter
         ? (includeMetadata
             ? QString(
-                  "SELECT l.rowid - 1 AS line_number, l.file_position, m.timestamp_text, "
-                  "m.timestamp_epoch_ms, m.level FROM %1 l "
-                  "LEFT JOIN %2 m ON m.rowid = l.rowid "
-                  "WHERE %1 MATCH ? AND l.rowid >= ? ORDER BY l.rowid ASC LIMIT ?"
-              ).arg(table, metaTable)
+                  "SELECT i.rowid - 1 AS line_number, i.file_position, m.timestamp_text, "
+                  "m.timestamp_epoch_ms, m.level FROM %1 f "
+                  "JOIN %2 i ON i.rowid = f.rowid "
+                  "LEFT JOIN %3 m ON m.rowid = i.rowid "
+                  "WHERE %1 MATCH ? AND i.rowid >= ? ORDER BY i.rowid ASC LIMIT ?"
+              ).arg(table, indexTable, metaTable)
             : QString(
-                  "SELECT rowid - 1 AS line_number, file_position FROM %1 "
-                  "WHERE %1 MATCH ? AND rowid >= ? ORDER BY rowid ASC LIMIT ?"
-              ).arg(table))
+                  "SELECT i.rowid - 1 AS line_number, i.file_position FROM %1 f "
+                  "JOIN %2 i ON i.rowid = f.rowid "
+                  "WHERE %1 MATCH ? AND i.rowid >= ? ORDER BY i.rowid ASC LIMIT ?"
+              ).arg(table, indexTable))
         : (includeMetadata
             ? QString(
-                  "SELECT l.rowid - 1 AS line_number, l.file_position, m.timestamp_text, "
-                  "m.timestamp_epoch_ms, m.level FROM %1 l "
-                  "LEFT JOIN %2 m ON m.rowid = l.rowid "
-                  "WHERE l.rowid >= ? ORDER BY l.rowid ASC LIMIT ?"
-              ).arg(table, metaTable)
+                  "SELECT i.rowid - 1 AS line_number, i.file_position, m.timestamp_text, "
+                  "m.timestamp_epoch_ms, m.level FROM %1 i "
+                  "LEFT JOIN %2 m ON m.rowid = i.rowid "
+                  "WHERE i.rowid >= ? ORDER BY i.rowid ASC LIMIT ?"
+              ).arg(indexTable, metaTable)
             : QString(
                   "SELECT rowid - 1 AS line_number, file_position FROM %1 "
                   "WHERE rowid >= ? ORDER BY rowid ASC LIMIT ?"
-              ).arg(table));
+              ).arg(indexTable));
 
     QSqlQuery q(m_db);
     q.prepare(sql);
@@ -360,7 +394,7 @@ int LogDatabase::timestampRowCount(int fileId, const QString& ftsFilter) {
     const bool hasFilter = !filter.isEmpty();
     const QString sql = hasFilter
         ? QString(
-              "SELECT COUNT(*) FROM %1 m JOIN %2 l ON l.rowid = m.rowid "
+              "SELECT COUNT(*) FROM %1 m JOIN %2 f ON f.rowid = m.rowid "
               "WHERE m.timestamp_epoch_ms IS NOT NULL AND %2 MATCH ?"
           ).arg(metaTable, table)
         : QString("SELECT COUNT(*) FROM %1 WHERE timestamp_epoch_ms IS NOT NULL").arg(metaTable);

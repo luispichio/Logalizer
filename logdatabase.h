@@ -56,6 +56,7 @@ private:
     LogDatabase& operator=(const LogDatabase&) = delete;
 
     QString tableName(int fileId) const { return QString("logs_%1").arg(fileId); }
+    QString indexTableName(int fileId) const { return QString("logs_index_%1").arg(fileId); }
     QString metadataTableName(int fileId) const { return QString("logs_meta_%1").arg(fileId); }
     bool openDatabase();
     void resetDatabase();
