@@ -1,9 +1,10 @@
 #include "fileworker.h"
+#include "loglinestore.h"
 #include "logdatabase.h"
+#include "metadatapipeline.h"
 
 #include <QFile>
 #include <QFileInfo>
-#include <QTextStream>
 #include <QtCore/QtLogging>
 
 FileWorker::FileWorker(const QString& fileName, int fileId, QObject* parent)
@@ -34,50 +35,60 @@ void FileWorker::doWork() {
     qint64 totalBytes = fileInfo.size();
     qInfo() << "FileWorker: Ingesting" << m_fileName;
 
+    auto store = QSharedPointer<MmapLineStore>::create(m_fileName);
+    QString storeError;
+    if (!store->open(&storeError)) {
+        emit error(m_fileId, storeError);
+        return;
+    }
+    LogLineStoreRegistry::instance().registerStore(m_fileId, store);
+
     QFile file(m_fileName);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         emit error(m_fileId, QString("Cannot open file: %1").arg(m_fileName));
         return;
     }
 
-    QTextStream stream(&file);
     QVector<LineRecord> batch;
     batch.reserve(CHUNK_SIZE);
 
-    qint32 lineNumber = 0;
+    const qint32 totalLines = store->lineCount();
     qint64 bytesProcessed = 0;
 
-    while (!stream.atEnd()) {
+    for (qint32 lineNumber = 0; lineNumber < totalLines; ++lineNumber) {
         if (m_stopRequested) {
             qInfo() << "FileWorker: Stop requested, aborting ingestion.";
             break;
         }
 
-        qint64 posBefore = file.pos();
-        QString line = stream.readLine();
-        qint64 posAfter = file.pos();
-        bytesProcessed = posAfter;
+        const qint64 posBefore = store->filePosition(lineNumber);
+        const QByteArray lineBytes = store->lineBytes(lineNumber);
+        bytesProcessed = lineNumber + 1 < totalLines
+            ? store->filePosition(lineNumber + 1)
+            : totalBytes;
+        const QString line = QString::fromUtf8(lineBytes);
 
         batch.append(LineRecord(line, posBefore, lineNumber));
-        ++lineNumber;
 
         if (batch.size() >= CHUNK_SIZE) {
             LogDatabase::instance().insertBatch(m_fileId, batch);
+            MetadataPipeline::instance().enqueueBatch(m_fileId, batch);
             batch.clear();
 
-            emit chunkInserted(m_fileId, lineNumber);
-            emit progressUpdate(m_fileId, bytesProcessed, totalBytes, lineNumber);
+            emit chunkInserted(m_fileId, lineNumber + 1);
+            emit progressUpdate(m_fileId, bytesProcessed, totalBytes, lineNumber + 1);
         }
     }
 
     if (!m_stopRequested && !batch.isEmpty()) {
         LogDatabase::instance().insertBatch(m_fileId, batch);
-        emit chunkInserted(m_fileId, lineNumber);
+        MetadataPipeline::instance().enqueueBatch(m_fileId, batch);
+        emit chunkInserted(m_fileId, totalLines);
     }
 
-    emit progressUpdate(m_fileId, totalBytes, totalBytes, lineNumber);
+    emit progressUpdate(m_fileId, totalBytes, totalBytes, totalLines);
     emit finished(m_fileId);
 
-    qInfo() << "FileWorker: Ingestion complete." << lineNumber << "lines,"
+    qInfo() << "FileWorker: Ingestion complete." << totalLines << "lines,"
             << totalBytes << "bytes.";
 }

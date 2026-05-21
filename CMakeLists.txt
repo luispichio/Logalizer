@@ -59,6 +59,10 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         fileworker.h fileworker.cpp
         processworker.h processworker.cpp
         streamworker.h streamworker.cpp
+        loglinestore.h loglinestore.cpp
+        loglineparser.h loglineparser.cpp
+        metadataconfig.h metadataconfig.cpp
+        metadatapipeline.h metadatapipeline.cpp
         logdatabase.h logdatabase.cpp
     )
 
@@ -189,6 +193,7 @@ add_custom_target(package-appimage
         ${CMAKE_BINARY_DIR}
         ${CMAKE_SOURCE_DIR}
         ${QT_QMAKE_EXECUTABLE}
+        ${CPACK_PACKAGE_VERSION}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     DEPENDS Logalizer
     COMMENT "Generating AppImage (bundles Qt ${Qt${QT_VERSION_MAJOR}_VERSION})..."

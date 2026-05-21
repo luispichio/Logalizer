@@ -1,5 +1,7 @@
 #include "streamworker.h"
+#include "loglinestore.h"
 #include "logdatabase.h"
+#include "metadatapipeline.h"
 
 #include <QIODevice>
 #include <QTextStream>
@@ -28,6 +30,14 @@ void StreamWorker::doWork() {
 
     qInfo() << "StreamWorker: Ingesting stdin";
 
+    auto store = QSharedPointer<SpillLineStore>::create();
+    QString storeError;
+    if (!store->open(&storeError)) {
+        emit error(m_fileId, storeError);
+        return;
+    }
+    LogLineStoreRegistry::instance().registerStore(m_fileId, store);
+
     QTextStream stream(stdin, QIODevice::ReadOnly);
     QVector<LineRecord> batch;
     batch.reserve(CHUNK_SIZE);
@@ -42,12 +52,15 @@ void StreamWorker::doWork() {
         }
 
         const QString line = stream.readLine();
+        const QByteArray lineBytes = line.toUtf8();
+        store->appendLine(lineBytes, logicalPosition);
         batch.append(LineRecord(line, logicalPosition, lineNumber));
-        logicalPosition += line.toUtf8().size() + 1;
+        logicalPosition += lineBytes.size() + 1;
         ++lineNumber;
 
         if (batch.size() >= CHUNK_SIZE) {
             LogDatabase::instance().insertBatch(m_fileId, batch);
+            MetadataPipeline::instance().enqueueBatch(m_fileId, batch);
             batch.clear();
 
             emit chunkInserted(m_fileId, lineNumber);
@@ -57,6 +70,7 @@ void StreamWorker::doWork() {
 
     if (!batch.isEmpty()) {
         LogDatabase::instance().insertBatch(m_fileId, batch);
+        MetadataPipeline::instance().enqueueBatch(m_fileId, batch);
         emit chunkInserted(m_fileId, lineNumber);
     }
 

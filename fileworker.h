@@ -32,7 +32,7 @@ private:
     int m_fileId;
     std::atomic<bool> m_stopRequested{false};
 
-    static constexpr int CHUNK_SIZE = 10000;
+    static constexpr int CHUNK_SIZE = 2000;
 };
 
 #endif // FILEWORKER_H

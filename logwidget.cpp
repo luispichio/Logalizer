@@ -1,7 +1,10 @@
 #include "logwidget.h"
 #include "fileworker.h"
+#include "loglinestore.h"
+#include "metadatapipeline.h"
 #include "processworker.h"
 #include "streamworker.h"
+#include "loglineparser.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -102,6 +105,9 @@ LogWidget::LogWidget(SourceType sourceType, const QString& displayName, int file
 LogWidget::~LogWidget() {
     saveSettings();
     m_refreshTimer->stop();
+    if (m_metadataStatusTimer) {
+        m_metadataStatusTimer->stop();
+    }
     if (m_worker) {
         m_worker->stop();
     }
@@ -119,7 +125,9 @@ LogWidget::~LogWidget() {
             m_workerThread->wait(1000);
         }
     }
+    MetadataPipeline::instance().cancelFile(m_fileId);
     LogDatabase::instance().dropTable(m_fileId);
+    LogLineStoreRegistry::instance().unregisterStore(m_fileId);
     qInfo() << "LogWidget: Cleaned up fileId" << m_fileId << m_filePath;
 }
 
@@ -132,6 +140,16 @@ void LogWidget::setupUi() {
     m_refreshTimer->setSingleShot(true);
     m_refreshTimer->setInterval(REFRESH_DEBOUNCE_MS);
     connect(m_refreshTimer, &QTimer::timeout, this, &LogWidget::refreshData);
+
+    m_metadataStatusTimer = new QTimer(this);
+    m_metadataStatusTimer->setInterval(1000);
+    connect(m_metadataStatusTimer, &QTimer::timeout, this, [this]() {
+        updateMetadataStatusLabel();
+        if (sortByTimestamp()) {
+            refreshData();
+        }
+    });
+    m_metadataStatusTimer->start();
 
     {
         auto* viewContainer = new QWidget(this);
@@ -271,11 +289,23 @@ void LogWidget::setupUi() {
         m_showLineNumberCheck->setToolTip("Show the line number prefix in the text view");
         m_showLineNumberCheck->setChecked(true);
         toolBar->addWidget(m_showLineNumberCheck);
+        m_showTimestampCheck = new QCheckBox("Timestamp", viewContainer);
+        m_showTimestampCheck->setToolTip("Show detected timestamp prefix when available");
+        toolBar->addWidget(m_showTimestampCheck);
+        m_showLogLevelCheck = new QCheckBox("Level", viewContainer);
+        m_showLogLevelCheck->setToolTip("Show detected log level prefix when available");
+        toolBar->addWidget(m_showLogLevelCheck);
+        m_sortTimestampCheck = new QCheckBox("Sort time", viewContainer);
+        m_sortTimestampCheck->setToolTip("Show timestamped rows ordered by detected timestamp");
+        toolBar->addWidget(m_sortTimestampCheck);
         toolBar->addStretch();
         viewLayout->addLayout(toolBar);
 
         connect(m_wrapCheck, &QCheckBox::toggled, this, &LogWidget::onWrapToggled);
         connect(m_showLineNumberCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); saveSettings(); });
+        connect(m_showTimestampCheck, &QCheckBox::toggled, this, [this](bool) { fillBuffer(); applyBufferToView(); saveSettings(); });
+        connect(m_showLogLevelCheck, &QCheckBox::toggled, this, [this](bool) { fillBuffer(); applyBufferToView(); saveSettings(); });
+        connect(m_sortTimestampCheck, &QCheckBox::toggled, this, [this](bool) { setPointer(0, true); updateMetadataStatusLabel(); saveSettings(); });
 
         connect(m_textFindCombo->lineEdit(), &QLineEdit::returnPressed, this, &LogWidget::onTextFindSearch);
         connect(m_textFindCombo->lineEdit(), &QLineEdit::textChanged, this, [this]() {
@@ -340,6 +370,11 @@ void LogWidget::setupUi() {
         statusBar->addWidget(m_searchStatus);
         statusBar->addSpacing(12);
         statusBar->addWidget(m_textFindStatus);
+        statusBar->addSpacing(12);
+        m_metadataStatus = new QLabel("Meta: pending", this);
+        m_metadataStatus->setToolTip("Detected metadata parsing progress");
+        m_metadataStatus->setStyleSheet("color:#6c757d;");
+        statusBar->addWidget(m_metadataStatus);
         statusBar->addSpacing(12);
 
         statusBar->addStretch();
@@ -457,6 +492,22 @@ void LogWidget::refreshData() {
     setPointer(m_bufferPointer, true);
 }
 
+bool LogWidget::includeMetadataInRows() const {
+    return sortByTimestamp()
+        || (m_showTimestampCheck && m_showTimestampCheck->isChecked())
+        || (m_showLogLevelCheck && m_showLogLevelCheck->isChecked());
+}
+
+bool LogWidget::sortByTimestamp() const {
+    return m_sortTimestampCheck && m_sortTimestampCheck->isChecked();
+}
+
+int LogWidget::currentRowSpace() const {
+    return sortByTimestamp()
+        ? LogDatabase::instance().timestampRowCount(m_fileId, m_ftsFilter)
+        : static_cast<int>(m_totalLines);
+}
+
 int LogWidget::visibleRowCount() const {
     if (!m_textBrowser) {
         return 1;
@@ -473,19 +524,21 @@ void LogWidget::updateScrollBar() {
 
     const int visibleRows = visibleRowCount();
     const bool hasFilter = !m_ftsFilter.trimmed().isEmpty();
+    const int rowSpace = currentRowSpace();
     m_logScrollBar->blockSignals(true);
     m_logScrollBar->setPageStep(visibleRows);
-    m_logScrollBar->setMaximum(qMax(0, static_cast<int>(m_totalLines) - (hasFilter ? 1 : visibleRows)));
+    m_logScrollBar->setMaximum(qMax(0, rowSpace - ((hasFilter && !sortByTimestamp()) ? 1 : visibleRows)));
     m_logScrollBar->setValue(qBound(0, m_bufferPointer, m_logScrollBar->maximum()));
     m_logScrollBar->blockSignals(false);
 }
 
 void LogWidget::setPointer(int p, bool force, bool backwards) {
     const bool hasFilter = !m_ftsFilter.trimmed().isEmpty();
-    int maxP = qMax(0, static_cast<int>(m_totalLines) - (hasFilter ? 1 : visibleRowCount()));
+    const int rowSpace = currentRowSpace();
+    int maxP = qMax(0, rowSpace - ((hasFilter && !sortByTimestamp()) ? 1 : visibleRowCount()));
     p = qBound(0, p, maxP);
 
-    if (hasFilter) {
+    if (hasFilter && !sortByTimestamp()) {
         const int filtered = filteredLineAt(p, backwards);
         if (filtered >= 0) {
             p = qBound(0, filtered, maxP);
@@ -529,6 +582,11 @@ void LogWidget::moveFiltered(int steps) {
         return;
     }
 
+    if (sortByTimestamp()) {
+        setPointer(m_bufferPointer + steps);
+        return;
+    }
+
     const bool backwards = steps < 0;
     int line = m_bufferPointer;
     int remaining = qAbs(steps);
@@ -555,6 +613,8 @@ void LogWidget::fillBuffer() {
         m_bufferPointer,
         bufN,
         m_ftsFilter,
+        includeMetadataInRows(),
+        sortByTimestamp(),
         m_buffer,
         headers);
     m_bufferHeaders = headers;
@@ -568,13 +628,14 @@ void LogWidget::applyBufferToView() {
     QMap<QString, int> jsonFieldWidths;
     if (m_jsonHelperCheck && m_jsonHelperCheck->isChecked()
         && m_jsonCompactCheck && m_jsonCompactCheck->isChecked()) {
-        const int rawIdx = m_bufferHeaders.indexOf("raw");
-        if (rawIdx >= 0) {
+        const int lineNumberIdx = m_bufferHeaders.indexOf("line_number");
+        const auto store = LogLineStoreRegistry::instance().store(m_fileId);
+        if (lineNumberIdx >= 0 && store) {
             for (const auto& row : m_buffer) {
-                if (rawIdx >= row.size()) {
+                if (lineNumberIdx >= row.size()) {
                     continue;
                 }
-                const auto fields = jsonFieldsForRaw(row[rawIdx]);
+                const auto fields = jsonFieldsForRaw(store->lineText(row[lineNumberIdx].toInt()));
                 for (const auto& field : fields) {
                     jsonFieldWidths[field.first] = qMax(jsonFieldWidths.value(field.first), field.first.size());
                 }
@@ -608,7 +669,8 @@ void LogWidget::applyBufferToView() {
 
 QString LogWidget::buildRowHtml(const QVector<QString>& row, const QMap<QString, int>& jsonFieldWidths) const {
     const int lineNumberIdx = m_bufferHeaders.indexOf("line_number");
-    const int rawIdx = m_bufferHeaders.indexOf("raw");
+    const int timestampIdx = m_bufferHeaders.indexOf("timestamp_text");
+    const int levelIdx = m_bufferHeaders.indexOf("level");
 
     QStringList parts;
     if (m_showLineNumberCheck && m_showLineNumberCheck->isChecked() && lineNumberIdx >= 0 && lineNumberIdx < row.size()) {
@@ -621,15 +683,45 @@ QString LogWidget::buildRowHtml(const QVector<QString>& row, const QMap<QString,
                      .arg(displayNumber.toHtmlEscaped());
     }
 
+    if (m_showTimestampCheck && m_showTimestampCheck->isChecked()
+        && timestampIdx >= 0 && timestampIdx < row.size() && !row[timestampIdx].isEmpty()) {
+        parts << QString("<span style=\"color:#6c757d;\">%1</span>")
+                     .arg(row[timestampIdx].toHtmlEscaped());
+    }
+
+    if (m_showLogLevelCheck && m_showLogLevelCheck->isChecked()
+        && levelIdx >= 0 && levelIdx < row.size()) {
+        const LogLevel level = static_cast<LogLevel>(row[levelIdx].toInt());
+        const QString levelText = logLevelToString(level).toUpper();
+        if (!levelText.isEmpty()) {
+            QString color = "#6c757d";
+            if (level == LogLevel::Warn) {
+                color = "#b7791f";
+            } else if (level == LogLevel::Error || level == LogLevel::Fatal) {
+                color = "#c53030";
+            } else if (level == LogLevel::Info) {
+                color = "#2b6cb0";
+            } else if (level == LogLevel::Debug || level == LogLevel::Trace) {
+                color = "#718096";
+            }
+            parts << QString("<span style=\"color:%1; font-weight:700;\">%2</span>")
+                         .arg(color, levelText.toHtmlEscaped());
+        }
+    }
+
     QString prefix;
     if (!parts.isEmpty()) {
         prefix = parts.join(" <span style=\"color:#586e75;\">|</span> ");
         prefix += " <span style=\"color:#586e75;\">|</span> ";
     }
 
-    const QString display = (rawIdx >= 0 && rawIdx < row.size())
-        ? formatJsonLine(row[rawIdx], jsonFieldWidths)
-        : QString();
+    QString rawText;
+    if (lineNumberIdx >= 0 && lineNumberIdx < row.size()) {
+        if (const auto store = LogLineStoreRegistry::instance().store(m_fileId)) {
+            rawText = store->lineText(row[lineNumberIdx].toInt());
+        }
+    }
+    const QString display = formatJsonLine(rawText, jsonFieldWidths);
     const QString raw = highlightFindWords(display);
     return prefix + raw + "\n";
 }
@@ -869,6 +961,15 @@ void LogWidget::loadSettings() {
     if (m_showLineNumberCheck) {
         m_showLineNumberCheck->setChecked(settings.value("logWidget/showLineNumbers", true).toBool());
     }
+    if (m_showTimestampCheck) {
+        m_showTimestampCheck->setChecked(settings.value("logWidget/showTimestamp", false).toBool());
+    }
+    if (m_showLogLevelCheck) {
+        m_showLogLevelCheck->setChecked(settings.value("logWidget/showLogLevel", false).toBool());
+    }
+    if (m_sortTimestampCheck) {
+        m_sortTimestampCheck->setChecked(settings.value("logWidget/sortByTimestamp", false).toBool());
+    }
     if (m_jsonHelperCheck) {
         m_jsonHelperCheck->setChecked(settings.value("logWidget/jsonEnabled", false).toBool());
     }
@@ -891,6 +992,15 @@ void LogWidget::saveSettings() const {
     }
     if (m_showLineNumberCheck) {
         settings.setValue("logWidget/showLineNumbers", m_showLineNumberCheck->isChecked());
+    }
+    if (m_showTimestampCheck) {
+        settings.setValue("logWidget/showTimestamp", m_showTimestampCheck->isChecked());
+    }
+    if (m_showLogLevelCheck) {
+        settings.setValue("logWidget/showLogLevel", m_showLogLevelCheck->isChecked());
+    }
+    if (m_sortTimestampCheck) {
+        settings.setValue("logWidget/sortByTimestamp", m_sortTimestampCheck->isChecked());
     }
     if (m_jsonHelperCheck) {
         settings.setValue("logWidget/jsonEnabled", m_jsonHelperCheck->isChecked());
@@ -953,22 +1063,50 @@ void LogWidget::rememberComboText(QComboBox* combo, QStringList& history, const 
 }
 
 void LogWidget::updateStatusLabel() {
-    if (m_totalLines == 0 || m_buffer.isEmpty()) {
-        m_labelState->setText(m_ftsFilter.isEmpty() ? "Rows 0-0 of 0" : "Filter: no rows at this position");
+    const int rowSpace = currentRowSpace();
+    if (rowSpace == 0 || m_buffer.isEmpty()) {
+        if (sortByTimestamp()) {
+            m_labelState->setText("Timestamp rows 0-0 of 0");
+        } else {
+            m_labelState->setText(m_ftsFilter.isEmpty() ? "Rows 0-0 of 0" : "Filter: no rows at this position");
+        }
         return;
     }
 
     const int lastLineIdx = m_bufferHeaders.indexOf("line_number");
     int firstRow = m_bufferPointer + 1;
     int lastRow = firstRow + m_buffer.size() - 1;
-    if (lastLineIdx >= 0 && !m_buffer.isEmpty() && lastLineIdx < m_buffer.first().size()) {
+    if (!sortByTimestamp() && lastLineIdx >= 0 && !m_buffer.isEmpty() && lastLineIdx < m_buffer.first().size()) {
         firstRow = m_buffer.first()[lastLineIdx].toInt() + 1;
     }
-    if (lastLineIdx >= 0 && !m_buffer.isEmpty() && lastLineIdx < m_buffer.last().size()) {
+    if (!sortByTimestamp() && lastLineIdx >= 0 && !m_buffer.isEmpty() && lastLineIdx < m_buffer.last().size()) {
         lastRow = m_buffer.last()[lastLineIdx].toInt() + 1;
     }
-    const QString prefix = m_ftsFilter.isEmpty() ? "Rows" : "Filtered rows";
-    m_labelState->setText(QString("%1 %2-%3 of %4").arg(prefix).arg(firstRow).arg(lastRow).arg(m_totalLines));
+    const QString prefix = sortByTimestamp()
+        ? "Timestamp rows"
+        : (m_ftsFilter.isEmpty() ? "Rows" : "Filtered rows");
+    m_labelState->setText(QString("%1 %2-%3 of %4").arg(prefix).arg(firstRow).arg(lastRow).arg(rowSpace));
+}
+
+void LogWidget::updateMetadataStatusLabel() {
+    if (!m_metadataStatus) {
+        return;
+    }
+
+    const MetadataProgress progress = MetadataPipeline::instance().progress(m_fileId);
+    if (progress.queuedLines == 0 && progress.droppedLines == 0) {
+        m_metadataStatus->setText("Meta: pending");
+        return;
+    }
+
+    const int percent = progress.queuedLines > 0
+        ? static_cast<int>(qMin<qint64>(100, progress.processedLines * 100 / progress.queuedLines))
+        : 0;
+    QString text = QString("Meta: %1% (%2 tagged)").arg(percent).arg(progress.taggedLines);
+    if (progress.droppedLines > 0) {
+        text += QString(" partial, %1 dropped").arg(progress.droppedLines);
+    }
+    m_metadataStatus->setText(text);
 }
 
 bool LogWidget::eventFilter(QObject* obj, QEvent* event) {

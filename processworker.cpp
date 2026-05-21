@@ -1,5 +1,7 @@
 #include "processworker.h"
+#include "loglinestore.h"
 #include "logdatabase.h"
+#include "metadatapipeline.h"
 
 #include <QMetaObject>
 #include <QProcess>
@@ -22,6 +24,14 @@ void ProcessWorker::start() {
         emit error(m_fileId, "Failed to create database table");
         return;
     }
+
+    auto store = QSharedPointer<SpillLineStore>::create();
+    QString storeError;
+    if (!store->open(&storeError)) {
+        emit error(m_fileId, storeError);
+        return;
+    }
+    LogLineStoreRegistry::instance().registerStore(m_fileId, store);
 
     m_process = new QProcess(this);
     m_process->setProcessChannelMode(QProcess::MergedChannels);
@@ -111,6 +121,9 @@ void ProcessWorker::flushCompleteLines() {
         m_pending.remove(0, newlineIndex + 1);
 
         const QString line = QString::fromUtf8(lineBytes);
+        if (auto store = LogLineStoreRegistry::instance().store(m_fileId).dynamicCast<SpillLineStore>()) {
+            store->appendLine(lineBytes, m_logicalPosition);
+        }
         m_batch.append(LineRecord(line, m_logicalPosition, m_lineNumber));
         m_logicalPosition += lineBytes.size() + 1;
         ++m_lineNumber;
@@ -127,6 +140,7 @@ void ProcessWorker::flushBatch() {
     }
 
     LogDatabase::instance().insertBatch(m_fileId, m_batch);
+    MetadataPipeline::instance().enqueueBatch(m_fileId, m_batch);
     m_batch.clear();
 
     emit chunkInserted(m_fileId, m_lineNumber);
@@ -145,6 +159,9 @@ void ProcessWorker::flushRemainder() {
     m_pending.clear();
 
     const QString line = QString::fromUtf8(lineBytes);
+    if (auto store = LogLineStoreRegistry::instance().store(m_fileId).dynamicCast<SpillLineStore>()) {
+        store->appendLine(lineBytes, m_logicalPosition);
+    }
     m_batch.append(LineRecord(line, m_logicalPosition, m_lineNumber));
     m_logicalPosition += lineBytes.size();
     ++m_lineNumber;

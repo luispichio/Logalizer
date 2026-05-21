@@ -53,12 +53,19 @@ Actualmente se persiste:
 
 | Estado | Característica / Tarea | Descripción |
 |:---:|---|---|
+| ⏳ | **Autodetección de Timestamps** | Detectar automáticamente los timestamps de cada línea -> columna en la tabla -> permitir ordenamiento / búsqueda / rangos temporales |
+| ⏳ | **Autodetección de Log-level** | Detectar automáticamente nivel de log -> filtrado, resaltado, histograma |
+| ⏳ | **Resaltado de contenidos** | Resaltado de errores, warnings, cadenas, números, URL's, etc |
+| ⏳ | **Autocompletado** |  |
+| ⏳ | **Mezcla de archivos** | Mezcla de múltiples archivos en una misma vista (ordenado por timestamp). |
 | ⏳ | **Exportación de Resultados** | Exportar las filas filtradas/buscadas a JSONL o CSV. |
+| ⏳ | **Exportar Rangos** | Exportar rangos de líneas o resultados de búsqueda a JSONL o CSV. |
 | ⏳ | **Tests Unitarios** | Cobertura sobre consultas FTS5 y navegación en `LogDatabase`. |
 | ⏳ | **Workspaces** | Guardar sesiones completas: archivos abiertos, posición de navegación y filtros activos. |
-| ⏳ | **Exportar Rangos** | Exportar rangos de líneas o resultados de búsqueda a JSONL o CSV. |
-| ⏳ | **Cliente SFTP** | Conectarse a servidores remotos y descargar logs directamente. |
 | ⏳ | **Archivos comprimidos (.zip, .gz)** | Soporte para apertura de archivos comprimidos. |
+| ⏳ | **Detección automática de formatos** | Detectar automáticamente formato de logs -> columnas en tabla -> filtros dinámicos |
+| ⏳ | **Histograma** | Estadísticas de tipos de mensajes/líneas (warnings, errores, coincidencias de búsqueda) a lo largo del tiempo |
+| ⏳ | **Cliente SFTP** | Conectarse a servidores remotos y descargar logs directamente. |
 
 ## 🚀 Instalación y Compilación
 

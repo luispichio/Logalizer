@@ -19,11 +19,15 @@ public:
     bool createTable(int fileId);
     bool dropTable(int fileId);
     bool insertBatch(int fileId, const QVector<LineRecord>& records);
+    bool insertMetadataBatch(int fileId, const QVector<LineMetadataRecord>& records);
 
     bool queryRows(int fileId, int firstLineNumber, int limit,
                    const QString& ftsFilter,
+                   bool includeMetadata,
+                   bool sortByTimestamp,
                    QVector<QVector<QString>>& outRows,
                    QStringList& outHeaders);
+    int timestampRowCount(int fileId, const QString& ftsFilter);
 
     int findMatchLine(int fileId,
                       const QString& ftsFilter,
@@ -43,6 +47,7 @@ public:
     qint64 totalDbUsedBytes() const;
     qint64 totalDbSizeBytes() const;
     QSet<int> activeFileIds() const;
+    bool isFileActive(int fileId) const;
 
 private:
     LogDatabase();
@@ -51,6 +56,8 @@ private:
     LogDatabase& operator=(const LogDatabase&) = delete;
 
     QString tableName(int fileId) const { return QString("logs_%1").arg(fileId); }
+    QString indexTableName(int fileId) const { return QString("logs_index_%1").arg(fileId); }
+    QString metadataTableName(int fileId) const { return QString("logs_meta_%1").arg(fileId); }
     bool openDatabase();
     void resetDatabase();
 
