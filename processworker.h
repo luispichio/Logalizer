@@ -39,12 +39,12 @@ private:
     QProcess* m_process = nullptr;
     QByteArray m_pending;
     QVector<LineRecord> m_batch;
+    int m_batchSize;
     qint32 m_lineNumber = 0;
     qint64 m_logicalPosition = 0;
     bool m_finished = false;
     std::atomic<bool> m_stopRequested{false};
 
-    static constexpr int CHUNK_SIZE = 10000;
 };
 
 #endif // PROCESSWORKER_H

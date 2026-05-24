@@ -1,4 +1,5 @@
 #include "logwidget.h"
+#include "appsettings.h"
 #include "fileworker.h"
 #include "loglinestore.h"
 #include "metadatapipeline.h"
@@ -138,7 +139,7 @@ void LogWidget::setupUi() {
 
     m_refreshTimer = new QTimer(this);
     m_refreshTimer->setSingleShot(true);
-    m_refreshTimer->setInterval(REFRESH_DEBOUNCE_MS);
+    m_refreshTimer->setInterval(AppSettings::refreshDebounceMs());
     connect(m_refreshTimer, &QTimer::timeout, this, &LogWidget::refreshData);
 
     m_metadataStatusTimer = new QTimer(this);
@@ -950,6 +951,7 @@ QStringList LogWidget::currentFindWords() const {
 
 void LogWidget::loadSettings() {
     QSettings settings("Logalizer", "Logalizer");
+    m_searchHistoryLimit = AppSettings::searchHistoryLimit();
 
     loadComboHistory(m_searchCombo, m_ftsFilterHistory, "logWidget/ftsFilterHistory");
     loadComboHistory(m_jsonFieldFilterCombo, m_jsonFieldFilterHistory, "logWidget/jsonFieldFilterHistory");
@@ -970,17 +972,18 @@ void LogWidget::loadSettings() {
     if (m_sortTimestampCheck) {
         m_sortTimestampCheck->setChecked(settings.value("logWidget/sortByTimestamp", false).toBool());
     }
+    const AppSettingsValues appSettings = AppSettings::load();
     if (m_jsonHelperCheck) {
-        m_jsonHelperCheck->setChecked(settings.value("logWidget/jsonEnabled", false).toBool());
+        m_jsonHelperCheck->setChecked(appSettings.jsonEnabled);
     }
     if (m_jsonCompactCheck) {
-        m_jsonCompactCheck->setChecked(settings.value("logWidget/jsonCompact", true).toBool());
+        m_jsonCompactCheck->setChecked(appSettings.jsonCompact);
     }
     if (m_jsonOnlyValuesCheck) {
-        m_jsonOnlyValuesCheck->setChecked(settings.value("logWidget/jsonOnlyValues", false).toBool());
+        m_jsonOnlyValuesCheck->setChecked(appSettings.jsonOnlyValues);
     }
     if (m_jsonFieldFilterCombo) {
-        m_jsonFieldFilterCombo->setCurrentText(settings.value("logWidget/jsonFieldFilter", QString()).toString());
+        m_jsonFieldFilterCombo->setCurrentText(appSettings.jsonFieldFilter);
     }
 }
 
@@ -1048,7 +1051,8 @@ void LogWidget::rememberComboText(QComboBox* combo, QStringList& history, const 
 
     history.removeAll(text);
     history.prepend(text);
-    while (history.size() > 20) {
+    const int limit = qMax(1, m_searchHistoryLimit);
+    while (history.size() > limit) {
         history.removeLast();
     }
 

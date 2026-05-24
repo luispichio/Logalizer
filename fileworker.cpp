@@ -1,4 +1,5 @@
 #include "fileworker.h"
+#include "appsettings.h"
 #include "loglinestore.h"
 #include "logdatabase.h"
 #include "metadatapipeline.h"
@@ -8,7 +9,7 @@
 #include <QtCore/QtLogging>
 
 FileWorker::FileWorker(const QString& fileName, int fileId, QObject* parent)
-    : QObject(parent), m_fileName(fileName), m_fileId(fileId) {}
+    : QObject(parent), m_fileName(fileName), m_fileId(fileId), m_batchSize(AppSettings::fileBatchSize()) {}
 
 FileWorker::~FileWorker() {}
 
@@ -50,7 +51,7 @@ void FileWorker::doWork() {
     }
 
     QVector<LineRecord> batch;
-    batch.reserve(CHUNK_SIZE);
+    batch.reserve(m_batchSize);
 
     const qint32 totalLines = store->lineCount();
     qint64 bytesProcessed = 0;
@@ -70,7 +71,7 @@ void FileWorker::doWork() {
 
         batch.append(LineRecord(line, posBefore, lineNumber));
 
-        if (batch.size() >= CHUNK_SIZE) {
+        if (batch.size() >= m_batchSize) {
             LogDatabase::instance().insertBatch(m_fileId, batch);
             MetadataPipeline::instance().enqueueBatch(m_fileId, batch);
             batch.clear();

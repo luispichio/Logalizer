@@ -54,6 +54,8 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     qt_add_executable(Logalizer
         MANUAL_FINALIZATION
         ${PROJECT_SOURCES}
+        appsettings.h appsettings.cpp
+        settingsdialog.h settingsdialog.cpp
         logwidget.h logwidget.cpp
         linerecord.h
         fileworker.h fileworker.cpp

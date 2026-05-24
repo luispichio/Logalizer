@@ -1,4 +1,5 @@
 #include "processworker.h"
+#include "appsettings.h"
 #include "loglinestore.h"
 #include "logdatabase.h"
 #include "metadatapipeline.h"
@@ -10,9 +11,9 @@
 #include <QtCore/QtLogging>
 
 ProcessWorker::ProcessWorker(const QString& command, int fileId, QObject* parent)
-    : QObject(parent), m_command(command), m_fileId(fileId)
+    : QObject(parent), m_command(command), m_fileId(fileId), m_batchSize(AppSettings::processBatchSize())
 {
-    m_batch.reserve(CHUNK_SIZE);
+    m_batch.reserve(m_batchSize);
 }
 
 ProcessWorker::~ProcessWorker() {
@@ -128,7 +129,7 @@ void ProcessWorker::flushCompleteLines() {
         m_logicalPosition += lineBytes.size() + 1;
         ++m_lineNumber;
 
-        if (m_batch.size() >= CHUNK_SIZE) {
+        if (m_batch.size() >= m_batchSize) {
             flushBatch();
         }
     }
