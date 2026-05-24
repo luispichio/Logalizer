@@ -1,6 +1,9 @@
 #include "mainwindow.h"
 #include "logwidget.h"
 #include "logdatabase.h"
+#include "appsettings.h"
+#include "metadatapipeline.h"
+#include "settingsdialog.h"
 #include "version.h"
 
 #include <QLabel>
@@ -69,6 +72,12 @@ void MainWindow::setupUi() {
     connect(exitAction, &QAction::triggered, this, &QWidget::close);
     fileMenu->addAction(exitAction);
 
+    auto* editMenu = menuBar()->addMenu("&Edit");
+    auto* settingsAction = new QAction(QIcon::fromTheme("preferences-system"), "&Settings...", this);
+    settingsAction->setShortcut(QKeySequence::Preferences);
+    connect(settingsAction, &QAction::triggered, this, &MainWindow::onSettings);
+    editMenu->addAction(settingsAction);
+
     auto* helpMenu = menuBar()->addMenu("&Help");
     auto* aboutAction = new QAction(QIcon::fromTheme("help-about"), "&About", this);
     connect(aboutAction, &QAction::triggered, this, &MainWindow::onAbout);
@@ -78,6 +87,8 @@ void MainWindow::setupUi() {
     auto* toolBar = addToolBar("Main");
     toolBar->addAction(openAction);
     toolBar->addAction(runCommandAction);
+    toolBar->addSeparator();
+    toolBar->addAction(settingsAction);
     toolBar->addSeparator();
     toolBar->addAction(aboutAction);
 
@@ -157,9 +168,7 @@ void MainWindow::loadSettings() {
     QSettings settings("Logalizer", "Logalizer");
     m_recentFiles = settings.value("mainWindow/recentFiles").toStringList();
     m_recentFiles.removeAll(QString());
-    while (m_recentFiles.size() > 15) {
-        m_recentFiles.removeLast();
-    }
+    trimRecentFiles();
     rebuildRecentFilesMenu();
 }
 
@@ -176,11 +185,16 @@ void MainWindow::addRecentFile(const QString& filePath) {
 
     m_recentFiles.removeAll(cleanPath);
     m_recentFiles.prepend(cleanPath);
-    while (m_recentFiles.size() > 15) {
-        m_recentFiles.removeLast();
-    }
+    trimRecentFiles();
     rebuildRecentFilesMenu();
     saveSettings();
+}
+
+void MainWindow::trimRecentFiles() {
+    const int limit = AppSettings::recentFilesLimit();
+    while (m_recentFiles.size() > limit) {
+        m_recentFiles.removeLast();
+    }
 }
 
 void MainWindow::rebuildRecentFilesMenu() {
@@ -220,6 +234,20 @@ void MainWindow::clearRecentFiles() {
     rebuildRecentFilesMenu();
     saveSettings();
     statusBar()->showMessage("Recent files cleared", 3000);
+}
+
+void MainWindow::onSettings() {
+    SettingsDialog dialog(this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    AppSettings::save(dialog.values());
+    trimRecentFiles();
+    rebuildRecentFilesMenu();
+    saveSettings();
+    MetadataPipeline::instance().reloadConfig();
+    statusBar()->showMessage("Settings saved", 3000);
 }
 
 void MainWindow::openStdin() {

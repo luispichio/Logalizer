@@ -27,9 +27,8 @@ private:
     void doWork();
 
     int m_fileId;
+    int m_batchSize;
     std::atomic<bool> m_stopRequested{false};
-
-    static constexpr int CHUNK_SIZE = 10000;
 };
 
 #endif // STREAMWORKER_H

@@ -107,7 +107,6 @@ private:
 
     QTimer* m_refreshTimer = nullptr;
     QTimer* m_metadataStatusTimer = nullptr;
-    static constexpr int REFRESH_DEBOUNCE_MS = 1500;
 
     QVBoxLayout* m_mainLayout = nullptr;
 
@@ -139,6 +138,7 @@ private:
     QCheckBox* m_jsonCompactCheck = nullptr;
     QCheckBox* m_jsonOnlyValuesCheck = nullptr;
     QStringList m_jsonFieldFilterHistory;
+    int m_searchHistoryLimit = 20;
     QScrollBar* m_logScrollBar = nullptr;
 
     QLabel* m_labelSize = nullptr;

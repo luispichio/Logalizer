@@ -1,4 +1,5 @@
 #include "streamworker.h"
+#include "appsettings.h"
 #include "loglinestore.h"
 #include "logdatabase.h"
 #include "metadatapipeline.h"
@@ -10,7 +11,7 @@
 #include <cstdio>
 
 StreamWorker::StreamWorker(int fileId, QObject* parent)
-    : QObject(parent), m_fileId(fileId) {}
+    : QObject(parent), m_fileId(fileId), m_batchSize(AppSettings::streamBatchSize()) {}
 
 StreamWorker::~StreamWorker() {}
 
@@ -40,7 +41,7 @@ void StreamWorker::doWork() {
 
     QTextStream stream(stdin, QIODevice::ReadOnly);
     QVector<LineRecord> batch;
-    batch.reserve(CHUNK_SIZE);
+    batch.reserve(m_batchSize);
 
     qint32 lineNumber = 0;
     qint64 logicalPosition = 0;
@@ -58,7 +59,7 @@ void StreamWorker::doWork() {
         logicalPosition += lineBytes.size() + 1;
         ++lineNumber;
 
-        if (batch.size() >= CHUNK_SIZE) {
+        if (batch.size() >= m_batchSize) {
             LogDatabase::instance().insertBatch(m_fileId, batch);
             MetadataPipeline::instance().enqueueBatch(m_fileId, batch);
             batch.clear();

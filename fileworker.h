@@ -30,9 +30,8 @@ private:
 
     QString m_fileName;
     int m_fileId;
+    int m_batchSize;
     std::atomic<bool> m_stopRequested{false};
-
-    static constexpr int CHUNK_SIZE = 2000;
 };
 
 #endif // FILEWORKER_H
