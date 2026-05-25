@@ -6,6 +6,7 @@
 #include <QDialog>
 
 class QCheckBox;
+class QComboBox;
 class QLineEdit;
 class QPlainTextEdit;
 class QSpinBox;
@@ -38,6 +39,8 @@ private:
 
     QSpinBox* m_metadataRegexScanLimit = nullptr;
     QCheckBox* m_metadataPreferRegexRules = nullptr;
+    QComboBox* m_timestampDisplayMode = nullptr;
+    QLineEdit* m_timestampCustomFormat = nullptr;
 
     QCheckBox* m_formatDetectionEnabled = nullptr;
     QSpinBox* m_formatDetectionSampleLines = nullptr;

@@ -37,6 +37,8 @@
 
 #include <algorithm>
 
+#include <QDateTime>
+
 namespace {
 QStringList splitJsonFilterTokens(const QString& text) {
     QString normalized = text;
@@ -702,7 +704,6 @@ void LogWidget::applyBufferToView() {
 
 QString LogWidget::buildRowHtml(const QVector<QString>& row, const QMap<QString, int>& jsonFieldWidths) const {
     const int lineNumberIdx = m_bufferHeaders.indexOf("line_number");
-    const int timestampIdx = m_bufferHeaders.indexOf("timestamp_text");
     const int levelIdx = m_bufferHeaders.indexOf("level");
 
     QStringList parts;
@@ -716,10 +717,10 @@ QString LogWidget::buildRowHtml(const QVector<QString>& row, const QMap<QString,
                      .arg(displayNumber.toHtmlEscaped());
     }
 
-    if (m_showTimestampCheck && m_showTimestampCheck->isChecked()
-        && timestampIdx >= 0 && timestampIdx < row.size() && !row[timestampIdx].isEmpty()) {
+    const QString timestampText = timestampDisplayText(row);
+    if (m_showTimestampCheck && m_showTimestampCheck->isChecked() && !timestampText.isEmpty()) {
         parts << QString("<span style=\"color:#6c757d;\">%1</span>")
-                     .arg(row[timestampIdx].toHtmlEscaped());
+                     .arg(timestampText.toHtmlEscaped());
     }
 
     if (m_showLogLevelCheck && m_showLogLevelCheck->isChecked()
@@ -757,6 +758,33 @@ QString LogWidget::buildRowHtml(const QVector<QString>& row, const QMap<QString,
     const QString display = formatJsonLine(rawText, jsonFieldWidths);
     const QString raw = highlightFindWords(display);
     return prefix + raw + "\n";
+}
+
+QString LogWidget::timestampDisplayText(const QVector<QString>& row) const {
+    const int timestampIdx = m_bufferHeaders.indexOf("timestamp_text");
+    const int epochIdx = m_bufferHeaders.indexOf("timestamp_epoch_ms");
+    const QString original = timestampIdx >= 0 && timestampIdx < row.size() ? row[timestampIdx] : QString();
+    if (m_timestampDisplayMode == "original") {
+        return original;
+    }
+
+    bool ok = false;
+    const qint64 epochMs = epochIdx >= 0 && epochIdx < row.size() ? row[epochIdx].toLongLong(&ok) : -1;
+    if (!ok || epochMs < 0) {
+        return original;
+    }
+
+    const QDateTime dateTime = QDateTime::fromMSecsSinceEpoch(epochMs);
+    if (m_timestampDisplayMode == "iso-local") {
+        return dateTime.toLocalTime().toString(Qt::ISODateWithMs);
+    }
+    if (m_timestampDisplayMode == "custom") {
+        const QString format = m_timestampCustomFormat.trimmed().isEmpty()
+            ? QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")
+            : m_timestampCustomFormat.trimmed();
+        return dateTime.toLocalTime().toString(format);
+    }
+    return dateTime.toUTC().toString(Qt::ISODateWithMs);
 }
 
 QString LogWidget::formatJsonLine(const QString& raw, const QMap<QString, int>& jsonFieldWidths) const {
@@ -984,6 +1012,9 @@ QStringList LogWidget::currentFindWords() const {
 void LogWidget::loadSettings() {
     QSettings settings("Logalizer", "Logalizer");
     m_searchHistoryLimit = AppSettings::searchHistoryLimit();
+    const AppSettingsValues appSettings = AppSettings::load();
+    m_timestampDisplayMode = appSettings.timestampDisplayMode;
+    m_timestampCustomFormat = appSettings.timestampCustomFormat;
 
     loadComboHistory(m_searchCombo, m_ftsFilterHistory, "logWidget/ftsFilterHistory");
     loadComboHistory(m_jsonFieldFilterCombo, m_jsonFieldFilterHistory, "logWidget/jsonFieldFilterHistory");
@@ -1004,7 +1035,6 @@ void LogWidget::loadSettings() {
     if (m_sortTimestampCheck) {
         m_sortTimestampCheck->setChecked(settings.value("logWidget/sortByTimestamp", false).toBool());
     }
-    const AppSettingsValues appSettings = AppSettings::load();
     if (m_jsonHelperCheck) {
         m_jsonHelperCheck->setChecked(appSettings.jsonEnabled);
     }

@@ -19,6 +19,8 @@ struct AppSettingsValues {
 
     int metadataRegexScanLimit = 1024;
     bool metadataPreferRegexRules = false;
+    QString timestampDisplayMode = "iso-utc";
+    QString timestampCustomFormat = "yyyy-MM-dd HH:mm:ss.zzz";
 
     bool formatDetectionEnabled = true;
     int formatDetectionSampleLines = 200;

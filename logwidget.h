@@ -71,6 +71,7 @@ private:
     void updateStatusLabel();
     void updateMetadataStatusLabel();
     QString buildRowHtml(const QVector<QString>& row, const QMap<QString, int>& jsonFieldWidths) const;
+    QString timestampDisplayText(const QVector<QString>& row) const;
     bool includeMetadataInRows() const;
     bool sortByTimestamp() const;
     int currentRowSpace() const;
@@ -157,6 +158,8 @@ private:
     qint64 m_fileSize = 0;
     qint32 m_totalLines = 0;
     LogFormatDetectionResult m_formatDetection;
+    QString m_timestampDisplayMode = "iso-utc";
+    QString m_timestampCustomFormat = "yyyy-MM-dd HH:mm:ss.zzz";
 };
 
 #endif // LOGWIDGET_H

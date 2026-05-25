@@ -37,6 +37,12 @@ AppSettingsValues AppSettings::load() {
 
     values.metadataRegexScanLimit = boundedInt(settings, "metadata/regexScanLimit", DefaultMetadataRegexScanLimit, 128, 8192);
     values.metadataPreferRegexRules = settings.value("metadata/preferRegexRules", false).toBool();
+    values.timestampDisplayMode = settings.value("logWidget/timestampDisplayMode", "iso-utc").toString();
+    if (values.timestampDisplayMode != "original" && values.timestampDisplayMode != "iso-local"
+        && values.timestampDisplayMode != "iso-utc" && values.timestampDisplayMode != "custom") {
+        values.timestampDisplayMode = "iso-utc";
+    }
+    values.timestampCustomFormat = settings.value("logWidget/timestampCustomFormat", "yyyy-MM-dd HH:mm:ss.zzz").toString();
 
     const QString defaultFormatsDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/formats";
     values.formatDetectionEnabled = settings.value("formatDetection/enabled", true).toBool();
@@ -70,6 +76,8 @@ void AppSettings::save(const AppSettingsValues& values) {
 
     settings.setValue("metadata/regexScanLimit", qBound(128, values.metadataRegexScanLimit, 8192));
     settings.setValue("metadata/preferRegexRules", values.metadataPreferRegexRules);
+    settings.setValue("logWidget/timestampDisplayMode", values.timestampDisplayMode);
+    settings.setValue("logWidget/timestampCustomFormat", values.timestampCustomFormat.trimmed());
 
     settings.setValue("formatDetection/enabled", values.formatDetectionEnabled);
     settings.setValue("formatDetection/sampleLines", qBound(10, values.formatDetectionSampleLines, 5000));
