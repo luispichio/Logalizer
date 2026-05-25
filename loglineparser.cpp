@@ -1,5 +1,6 @@
 #include "loglineparser.h"
 
+#include <QDate>
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -214,6 +215,82 @@ ParsedLineMetadata parseFormatMetadata(QStringView line, const MetadataDetection
         : parseFormatRegex(line, config.format, config.formatPatternName);
 }
 
+QString qtTimestampFormat(QString format) {
+    format.replace("%Y", "yyyy");
+    format.replace("%y", "yy");
+    format.replace("%m", "MM");
+    format.replace("%d", "dd");
+    format.replace("%H", "HH");
+    format.replace("%M", "mm");
+    format.replace("%S", "ss");
+    format.replace("%L", "zzz");
+    format.replace("%f", "zzz");
+    format.replace("%b", "MMM");
+    return format;
+}
+
+bool hasYearToken(const QString& format) {
+    return format.contains("%Y") || format.contains("%y");
+}
+
+bool hasDateToken(const QString& format) {
+    return hasYearToken(format) || format.contains("%m") || format.contains("%d") || format.contains("%b");
+}
+
+QString trimFractionForFormat(const QString& timestampText, const QString& format) {
+    if (!format.contains("%f")) {
+        return timestampText;
+    }
+
+    QRegularExpression fraction("([\\.,:])(\\d{3})\\d+");
+    return QString(timestampText).replace(fraction, "\\1\\2");
+}
+
+qint64 epochFromDateTime(const QDateTime& dateTime) {
+    return dateTime.isValid() ? dateTime.toMSecsSinceEpoch() : -1;
+}
+
+qint64 epochFromFormat(const QString& timestampText, const LogFormatDefinition& format, const QDate& referenceDate) {
+    if (timestampText.isEmpty()) {
+        return -1;
+    }
+
+    bool ok = false;
+    const double numeric = timestampText.toDouble(&ok);
+    if (ok && format.timestampDivisor > 0.0 && format.timestampDivisor != 1.0) {
+        return static_cast<qint64>((numeric / format.timestampDivisor) * 1000.0);
+    }
+
+    const QDate refDate = referenceDate.isValid() ? referenceDate : QDate::currentDate();
+    for (const QString& lnavFormat : format.timestampFormats) {
+        const QString text = trimFractionForFormat(QString(timestampText).replace(',', '.'), lnavFormat);
+        const QString qtFormat = qtTimestampFormat(lnavFormat);
+
+        if (!hasDateToken(lnavFormat)) {
+            const QTime time = QTime::fromString(text, qtFormat);
+            if (time.isValid()) {
+                return epochFromDateTime(QDateTime(refDate, time));
+            }
+            continue;
+        }
+
+        if (!hasYearToken(lnavFormat)) {
+            const QDateTime dateTime = QDateTime::fromString(QString("%1 %2").arg(refDate.year()).arg(text), "yyyy " + qtFormat);
+            if (dateTime.isValid()) {
+                return dateTime.toMSecsSinceEpoch();
+            }
+            continue;
+        }
+
+        const QDateTime dateTime = QDateTime::fromString(text, qtFormat);
+        if (dateTime.isValid()) {
+            return dateTime.toMSecsSinceEpoch();
+        }
+    }
+
+    return -1;
+}
+
 QString detectTimestampByRegex(QStringView line, const MetadataDetectionConfig& config) {
     if (config.timestampRules.isEmpty()) {
         return QString();
@@ -361,9 +438,16 @@ QString detectTimestamp(QStringView line) {
     return QString();
 }
 
-qint64 epochFromText(const QString& timestampText) {
+qint64 epochFromText(const QString& timestampText, const MetadataDetectionConfig& config) {
     if (timestampText.isEmpty()) {
         return -1;
+    }
+
+    if (config.hasFormat) {
+        const qint64 formatted = epochFromFormat(timestampText, config.format, config.referenceDate);
+        if (formatted >= 0) {
+            return formatted;
+        }
     }
 
     bool ok = false;
@@ -423,7 +507,7 @@ ParsedLineMetadata parseLineMetadata(QStringView line, const MetadataDetectionCo
         }
     }
 
-    metadata.timestampEpochMs = epochFromText(metadata.timestampText);
+    metadata.timestampEpochMs = epochFromText(metadata.timestampText, config);
     return metadata;
 }
 

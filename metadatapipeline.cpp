@@ -105,6 +105,7 @@ void MetadataPipeline::enqueueBatch(int fileId, const QVector<LineRecord>& recor
             config.format = formatResult.format;
             config.formatPatternName = formatResult.patternName;
         }
+        config.referenceDate = m_referenceDateByFile.value(fileId, QDate::currentDate());
     }
     m_parserPool.start(new ParseMetadataTask(fileId, std::move(lines), config));
 }
@@ -113,6 +114,7 @@ void MetadataPipeline::cancelFile(int fileId) {
     QMutexLocker locker(&m_mutex);
     m_cancelledFileIds.insert(fileId);
     m_formatByFile.remove(fileId);
+    m_referenceDateByFile.remove(fileId);
 
     for (int i = m_pendingWrites.size() - 1; i >= 0; --i) {
         if (m_pendingWrites.at(i).first == fileId) {
@@ -147,6 +149,11 @@ void MetadataPipeline::setDetectedFormat(int fileId, const LogFormatDetectionRes
 LogFormatDetectionResult MetadataPipeline::detectedFormat(int fileId) const {
     QMutexLocker locker(&m_mutex);
     return m_formatByFile.value(fileId);
+}
+
+void MetadataPipeline::setReferenceDate(int fileId, const QDate& date) {
+    QMutexLocker locker(&m_mutex);
+    m_referenceDateByFile.insert(fileId, date.isValid() ? date : QDate::currentDate());
 }
 
 void MetadataPipeline::shutdown() {

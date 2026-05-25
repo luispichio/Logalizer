@@ -2,6 +2,7 @@
 #define METADATACONFIG_H
 
 #include <QRegularExpression>
+#include <QDate>
 #include <QString>
 #include <QVector>
 
@@ -27,6 +28,7 @@ struct MetadataDetectionConfig {
     LogFormatDefinition format;
     QString formatPatternName;
     bool hasFormat = false;
+    QDate referenceDate;
     int regexScanLimit = 1024;
     bool preferRegexRules = false;
 };

@@ -7,7 +7,35 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QDate>
+#include <QRegularExpression>
 #include <QtCore/QtLogging>
+
+namespace {
+QDate referenceDateForPath(const QString& fileName) {
+    const QString text = QFileInfo(fileName).fileName();
+    const QRegularExpression compact("(\\d{4})(\\d{2})(\\d{2})");
+    QRegularExpressionMatch match = compact.match(text);
+    if (match.hasMatch()) {
+        const QDate date(match.captured(1).toInt(), match.captured(2).toInt(), match.captured(3).toInt());
+        if (date.isValid()) {
+            return date;
+        }
+    }
+
+    const QRegularExpression separated("(\\d{4})[-_.](\\d{2})[-_.](\\d{2})");
+    match = separated.match(text);
+    if (match.hasMatch()) {
+        const QDate date(match.captured(1).toInt(), match.captured(2).toInt(), match.captured(3).toInt());
+        if (date.isValid()) {
+            return date;
+        }
+    }
+
+    const QFileInfo info(fileName);
+    return info.exists() ? info.lastModified().date() : QDate::currentDate();
+}
+}
 
 FileWorker::FileWorker(const QString& fileName, int fileId, QObject* parent)
     : QObject(parent), m_fileName(fileName), m_fileId(fileId), m_batchSize(AppSettings::fileBatchSize()), m_sampleLineLimit(AppSettings::formatDetectionSampleLines()) {}
@@ -36,6 +64,7 @@ void FileWorker::doWork() {
 
     qint64 totalBytes = fileInfo.size();
     qInfo() << "FileWorker: Ingesting" << m_fileName;
+    MetadataPipeline::instance().setReferenceDate(m_fileId, referenceDateForPath(m_fileName));
 
     auto store = QSharedPointer<MmapLineStore>::create(m_fileName);
     QString storeError;

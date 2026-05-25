@@ -24,6 +24,8 @@ struct LogFormatDefinition {
     QString timestampField;
     QString levelField;
     QString bodyField;
+    QStringList timestampFormats;
+    double timestampDivisor = 1.0;
     QHash<QString, QString> levelPatterns;
     QVector<LogFormatPattern> patterns;
     QStringList valueNames;

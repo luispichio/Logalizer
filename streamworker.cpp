@@ -6,6 +6,7 @@
 #include "metadatapipeline.h"
 
 #include <QIODevice>
+#include <QDate>
 #include <QTextStream>
 #include <QtCore/QtLogging>
 

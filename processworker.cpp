@@ -7,6 +7,7 @@
 
 #include <QMetaObject>
 #include <QProcess>
+#include <QDate>
 #include <QStringList>
 #include <QThread>
 #include <QtCore/QtLogging>
@@ -26,6 +27,7 @@ void ProcessWorker::start() {
         emit error(m_fileId, "Failed to create database table");
         return;
     }
+    MetadataPipeline::instance().setReferenceDate(m_fileId, QDate::currentDate());
 
     auto store = QSharedPointer<SpillLineStore>::create();
     QString storeError;

@@ -22,6 +22,15 @@ void addFormatFromObject(const QString& id, const QJsonObject& object, const QSt
     format.timestampField = object.value("timestamp-field").toString();
     format.levelField = object.value("level-field").toString();
     format.bodyField = object.value("body-field").toString();
+    format.timestampDivisor = object.value("timestamp-divisor").toDouble(1.0);
+
+    const QJsonArray timestampFormats = object.value("timestamp-format").toArray();
+    for (const QJsonValue& value : timestampFormats) {
+        const QString text = value.toString();
+        if (!text.isEmpty()) {
+            format.timestampFormats.append(text);
+        }
+    }
 
     if (!format.filePattern.isEmpty()) {
         format.fileRegex = QRegularExpression(format.filePattern, QRegularExpression::CaseInsensitiveOption);
@@ -49,6 +58,23 @@ void addFormatFromObject(const QString& id, const QJsonObject& object, const QSt
             continue;
         }
         format.patterns.append(compiled);
+    }
+
+    if (format.timestampField.isEmpty()) {
+        for (const LogFormatPattern& pattern : format.patterns) {
+            if (pattern.regex.namedCaptureGroups().contains("timestamp")) {
+                format.timestampField = "timestamp";
+                break;
+            }
+        }
+    }
+    if (format.bodyField.isEmpty()) {
+        for (const LogFormatPattern& pattern : format.patterns) {
+            if (pattern.regex.namedCaptureGroups().contains("body")) {
+                format.bodyField = "body";
+                break;
+            }
+        }
     }
 
     const QJsonObject levelObject = object.value("level").toObject();

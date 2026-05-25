@@ -1,0 +1,38 @@
+{
+    "$schema": "https://lnav.org/schemas/format-v1.schema.json",
+    "tesacom_colon_log": {
+        "title": "Tesacom colon log",
+        "description": "Colon-separated application log with date inferred from file name.",
+        "file-pattern": "log_\\d{8}\\.\\d+\\.log$",
+        "regex": {
+            "line": {
+                "pattern": "^(?<timestamp>\\d{2}:\\d{2}:\\d{2}:\\d{3})\\s+::\\s+(?<component>.*?)\\s+::\\s+(?<level>LOG_[A-Z]+)\\s+::\\s+(?<body>.*)$"
+            }
+        },
+        "timestamp-field": "timestamp",
+        "timestamp-format": [
+            "%H:%M:%S:%L"
+        ],
+        "level-field": "level",
+        "body-field": "body",
+        "level": {
+            "error": "LOG_ERR",
+            "warning": "LOG_WARN|LOG_WARNING",
+            "info": "LOG_NOTICE|LOG_INFO",
+            "debug": "LOG_DATA|LOG_DEBUG",
+            "trace": "LOG_TRACE"
+        },
+        "value": {
+            "component": {
+                "kind": "string",
+                "identifier": true
+            },
+            "level": {
+                "kind": "string"
+            },
+            "body": {
+                "kind": "string"
+            }
+        }
+    }
+}
