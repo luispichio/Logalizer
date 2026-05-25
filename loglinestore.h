@@ -60,6 +60,7 @@ public:
 
 private:
     QTemporaryFile* m_file = nullptr;
+    qint64 m_writeOffset = 0;
     QVector<qint64> m_offsets;
     QVector<qint64> m_positions;
     QVector<qint32> m_lengths;

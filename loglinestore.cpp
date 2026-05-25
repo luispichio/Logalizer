@@ -112,11 +112,16 @@ bool SpillLineStore::appendLine(const QByteArray& lineBytes, qint64 logicalPosit
     }
 
     QMutexLocker ioLocker(&m_ioMutex);
-    const qint64 offset = m_file->pos();
+    const qint64 offset = m_writeOffset;
+    if (!m_file->seek(offset)) {
+        qWarning() << "SpillLineStore: Failed to seek for append:" << m_file->errorString();
+        return false;
+    }
     if (m_file->write(lineBytes) != lineBytes.size()) {
         qWarning() << "SpillLineStore: Failed to write line to temporary file:" << m_file->errorString();
         return false;
     }
+    m_writeOffset += lineBytes.size();
 
     QWriteLocker locker(&m_lock);
     m_offsets.append(offset);

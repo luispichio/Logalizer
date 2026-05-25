@@ -8,6 +8,8 @@
 #include "linerecord.h"
 #include "logformat.h"
 
+class SpillLineStore;
+
 class StreamWorker : public QObject {
     Q_OBJECT
 
@@ -28,6 +30,9 @@ signals:
 
 private:
     void doWork();
+    void appendLine(const QByteArray& lineBytes, QSharedPointer<SpillLineStore> store,
+                    QVector<LineRecord>& batch, qint32& lineNumber, qint64& logicalPosition);
+    void flushBatch(QVector<LineRecord>& batch, qint32 lineNumber, qint64 logicalPosition);
 
     int m_fileId;
     int m_batchSize;
