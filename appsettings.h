@@ -19,6 +19,13 @@ struct AppSettingsValues {
 
     int metadataRegexScanLimit = 1024;
     bool metadataPreferRegexRules = false;
+    QString timestampDisplayMode = "iso-utc";
+    QString timestampCustomFormat = "yyyy-MM-dd HH:mm:ss.zzz";
+
+    bool formatDetectionEnabled = true;
+    int formatDetectionSampleLines = 200;
+    QString formatDetectionUserDirectory;
+    QString formatDetectionCustomJson;
 
     bool aiEnabled = false;
     QString aiProvider;
@@ -38,6 +45,8 @@ public:
     static int fileBatchSize();
     static int streamBatchSize();
     static int processBatchSize();
+    static bool formatDetectionEnabled();
+    static int formatDetectionSampleLines();
 };
 
 #endif // APPSETTINGS_H

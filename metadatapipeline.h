@@ -36,6 +36,9 @@ public:
     void enqueueParsedBatch(int fileId, int processedLines, QVector<LineMetadataRecord>&& records);
     MetadataProgress progress(int fileId) const;
     void reloadConfig();
+    void setDetectedFormat(int fileId, const LogFormatDetectionResult& result);
+    LogFormatDetectionResult detectedFormat(int fileId) const;
+    void setReferenceDate(int fileId, const QDate& date);
 
 private:
     MetadataPipeline();
@@ -52,6 +55,8 @@ private:
     QQueue<QPair<int, QVector<LineMetadataRecord>>> m_pendingWrites;
     QSet<int> m_cancelledFileIds;
     QHash<int, MetadataProgress> m_progressByFile;
+    QHash<int, LogFormatDetectionResult> m_formatByFile;
+    QHash<int, QDate> m_referenceDateByFile;
     MetadataDetectionConfig m_detectionConfig;
     QAtomicInt m_pendingInputLines = 0;
     bool m_stopping = false;

@@ -1,12 +1,15 @@
 #include "mainwindow.h"
+#include "logformat.h"
 
 #include <QApplication>
 #include <QLocale>
+#include <QMetaType>
 #include <QTranslator>
 
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
+    qRegisterMetaType<LogFormatDetectionResult>("LogFormatDetectionResult");
     a.setApplicationName("Logalizer");
     a.setApplicationVersion("0.1");
 

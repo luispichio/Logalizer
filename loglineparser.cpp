@@ -1,6 +1,9 @@
 #include "loglineparser.h"
 
+#include <QDate>
 #include <QDateTime>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRegularExpressionMatch>
 #include <QtGlobal>
 
@@ -121,6 +124,171 @@ LogLevel levelFromText(const QString& text) {
         return LogLevel::Fatal;
     }
     return LogLevel::Unknown;
+}
+
+QString jsonValueForPath(const QJsonObject& object, const QString& path) {
+    QJsonValue value = object;
+    for (const QString& part : path.split('.', Qt::SkipEmptyParts)) {
+        if (!value.isObject()) {
+            return QString();
+        }
+        value = value.toObject().value(part);
+    }
+
+    if (value.isString()) {
+        return value.toString();
+    }
+    if (value.isDouble()) {
+        return QString::number(value.toDouble(), 'g', 15);
+    }
+    if (value.isBool()) {
+        return value.toBool() ? "true" : "false";
+    }
+    return QString();
+}
+
+LogLevel levelFromFormat(const QString& value, const LogFormatDefinition& format) {
+    const LogLevel direct = levelFromText(value);
+    if (direct != LogLevel::Unknown) {
+        return direct;
+    }
+
+    for (auto it = format.levelPatterns.constBegin(); it != format.levelPatterns.constEnd(); ++it) {
+        const QString pattern = it.value();
+        if (pattern.isEmpty()) {
+            continue;
+        }
+        const QRegularExpression regex(pattern, QRegularExpression::CaseInsensitiveOption);
+        if ((regex.isValid() && regex.match(value).hasMatch()) || value.compare(pattern, Qt::CaseInsensitive) == 0) {
+            return levelFromText(it.key());
+        }
+    }
+    return LogLevel::Unknown;
+}
+
+ParsedLineMetadata parseFormatJson(QStringView line, const LogFormatDefinition& format) {
+    ParsedLineMetadata metadata;
+    QJsonParseError error;
+    const QJsonDocument doc = QJsonDocument::fromJson(line.toString().toUtf8(), &error);
+    if (error.error != QJsonParseError::NoError || !doc.isObject()) {
+        return metadata;
+    }
+
+    const QJsonObject object = doc.object();
+    if (!format.timestampField.isEmpty()) {
+        metadata.timestampText = jsonValueForPath(object, format.timestampField);
+    }
+    if (!format.levelField.isEmpty()) {
+        metadata.level = levelFromFormat(jsonValueForPath(object, format.levelField), format);
+    }
+    return metadata;
+}
+
+ParsedLineMetadata parseFormatRegex(QStringView line, const LogFormatDefinition& format, const QString& patternName) {
+    ParsedLineMetadata metadata;
+    for (const LogFormatPattern& pattern : format.patterns) {
+        if (!patternName.isEmpty() && pattern.name != patternName) {
+            continue;
+        }
+
+        const QRegularExpressionMatch match = pattern.regex.match(line.toString());
+        if (!match.hasMatch()) {
+            continue;
+        }
+        if (!format.timestampField.isEmpty()) {
+            metadata.timestampText = match.captured(format.timestampField).trimmed();
+        }
+        if (!format.levelField.isEmpty()) {
+            metadata.level = levelFromFormat(match.captured(format.levelField), format);
+        }
+        return metadata;
+    }
+    return metadata;
+}
+
+ParsedLineMetadata parseFormatMetadata(QStringView line, const MetadataDetectionConfig& config) {
+    if (!config.hasFormat) {
+        return ParsedLineMetadata{};
+    }
+    return config.format.json
+        ? parseFormatJson(line, config.format)
+        : parseFormatRegex(line, config.format, config.formatPatternName);
+}
+
+QString qtTimestampFormat(QString format) {
+    format.replace("%Y", "yyyy");
+    format.replace("%y", "yy");
+    format.replace("%m", "MM");
+    format.replace("%d", "dd");
+    format.replace("%H", "HH");
+    format.replace("%M", "mm");
+    format.replace("%S", "ss");
+    format.replace("%L", "zzz");
+    format.replace("%f", "zzz");
+    format.replace("%b", "MMM");
+    return format;
+}
+
+bool hasYearToken(const QString& format) {
+    return format.contains("%Y") || format.contains("%y");
+}
+
+bool hasDateToken(const QString& format) {
+    return hasYearToken(format) || format.contains("%m") || format.contains("%d") || format.contains("%b");
+}
+
+QString trimFractionForFormat(const QString& timestampText, const QString& format) {
+    if (!format.contains("%f")) {
+        return timestampText;
+    }
+
+    QRegularExpression fraction("([\\.,:])(\\d{3})\\d+");
+    return QString(timestampText).replace(fraction, "\\1\\2");
+}
+
+qint64 epochFromDateTime(const QDateTime& dateTime) {
+    return dateTime.isValid() ? dateTime.toMSecsSinceEpoch() : -1;
+}
+
+qint64 epochFromFormat(const QString& timestampText, const LogFormatDefinition& format, const QDate& referenceDate) {
+    if (timestampText.isEmpty()) {
+        return -1;
+    }
+
+    bool ok = false;
+    const double numeric = timestampText.toDouble(&ok);
+    if (ok && format.timestampDivisor > 0.0 && format.timestampDivisor != 1.0) {
+        return static_cast<qint64>((numeric / format.timestampDivisor) * 1000.0);
+    }
+
+    const QDate refDate = referenceDate.isValid() ? referenceDate : QDate::currentDate();
+    for (const QString& lnavFormat : format.timestampFormats) {
+        const QString text = trimFractionForFormat(QString(timestampText).replace(',', '.'), lnavFormat);
+        const QString qtFormat = qtTimestampFormat(lnavFormat);
+
+        if (!hasDateToken(lnavFormat)) {
+            const QTime time = QTime::fromString(text, qtFormat);
+            if (time.isValid()) {
+                return epochFromDateTime(QDateTime(refDate, time));
+            }
+            continue;
+        }
+
+        if (!hasYearToken(lnavFormat)) {
+            const QDateTime dateTime = QDateTime::fromString(QString("%1 %2").arg(refDate.year()).arg(text), "yyyy " + qtFormat);
+            if (dateTime.isValid()) {
+                return dateTime.toMSecsSinceEpoch();
+            }
+            continue;
+        }
+
+        const QDateTime dateTime = QDateTime::fromString(text, qtFormat);
+        if (dateTime.isValid()) {
+            return dateTime.toMSecsSinceEpoch();
+        }
+    }
+
+    return -1;
 }
 
 QString detectTimestampByRegex(QStringView line, const MetadataDetectionConfig& config) {
@@ -270,9 +438,16 @@ QString detectTimestamp(QStringView line) {
     return QString();
 }
 
-qint64 epochFromText(const QString& timestampText) {
+qint64 epochFromText(const QString& timestampText, const MetadataDetectionConfig& config) {
     if (timestampText.isEmpty()) {
         return -1;
+    }
+
+    if (config.hasFormat) {
+        const qint64 formatted = epochFromFormat(timestampText, config.format, config.referenceDate);
+        if (formatted >= 0) {
+            return formatted;
+        }
     }
 
     bool ok = false;
@@ -307,10 +482,14 @@ ParsedLineMetadata parseLineMetadata(QStringView line) {
 }
 
 ParsedLineMetadata parseLineMetadata(QStringView line, const MetadataDetectionConfig& config) {
-    ParsedLineMetadata metadata;
+    ParsedLineMetadata metadata = parseFormatMetadata(line, config);
     if (config.preferRegexRules) {
-        metadata.timestampText = detectTimestampByRegex(line, config);
-        metadata.level = detectLevelByRegex(line, config);
+        if (metadata.timestampText.isEmpty()) {
+            metadata.timestampText = detectTimestampByRegex(line, config);
+        }
+        if (metadata.level == LogLevel::Unknown) {
+            metadata.level = detectLevelByRegex(line, config);
+        }
     }
 
     if (metadata.timestampText.isEmpty()) {
@@ -328,7 +507,7 @@ ParsedLineMetadata parseLineMetadata(QStringView line, const MetadataDetectionCo
         }
     }
 
-    metadata.timestampEpochMs = epochFromText(metadata.timestampText);
+    metadata.timestampEpochMs = epochFromText(metadata.timestampText, config);
     return metadata;
 }
 

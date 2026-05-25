@@ -37,6 +37,8 @@
 
 #include <algorithm>
 
+#include <QDateTime>
+
 namespace {
 QStringList splitJsonFilterTokens(const QString& text) {
     QString normalized = text;
@@ -74,6 +76,7 @@ LogWidget::LogWidget(SourceType sourceType, const QString& displayName, int file
 
         connect(m_workerThread, &QThread::started, m_worker, &FileWorker::start);
         connect(m_worker, &FileWorker::progressUpdate, this, &LogWidget::onProgressUpdate);
+        connect(m_worker, &FileWorker::formatDetected, this, &LogWidget::onFormatDetected);
         connect(m_worker, &FileWorker::chunkInserted, this, &LogWidget::onChunkInserted);
         connect(m_worker, &FileWorker::finished, this, &LogWidget::onFinished);
         connect(m_worker, &FileWorker::error, this, &LogWidget::onError);
@@ -84,6 +87,7 @@ LogWidget::LogWidget(SourceType sourceType, const QString& displayName, int file
 
         connect(m_workerThread, &QThread::started, m_streamWorker, &StreamWorker::start);
         connect(m_streamWorker, &StreamWorker::progressUpdate, this, &LogWidget::onProgressUpdate);
+        connect(m_streamWorker, &StreamWorker::formatDetected, this, &LogWidget::onFormatDetected);
         connect(m_streamWorker, &StreamWorker::chunkInserted, this, &LogWidget::onChunkInserted);
         connect(m_streamWorker, &StreamWorker::finished, this, &LogWidget::onFinished);
         connect(m_streamWorker, &StreamWorker::error, this, &LogWidget::onError);
@@ -94,6 +98,7 @@ LogWidget::LogWidget(SourceType sourceType, const QString& displayName, int file
 
         connect(m_workerThread, &QThread::started, m_processWorker, &ProcessWorker::start);
         connect(m_processWorker, &ProcessWorker::progressUpdate, this, &LogWidget::onProgressUpdate);
+        connect(m_processWorker, &ProcessWorker::formatDetected, this, &LogWidget::onFormatDetected);
         connect(m_processWorker, &ProcessWorker::chunkInserted, this, &LogWidget::onChunkInserted);
         connect(m_processWorker, &ProcessWorker::finished, this, &LogWidget::onFinished);
         connect(m_processWorker, &ProcessWorker::error, this, &LogWidget::onError);
@@ -377,6 +382,11 @@ void LogWidget::setupUi() {
         m_metadataStatus->setStyleSheet("color:#6c757d;");
         statusBar->addWidget(m_metadataStatus);
         statusBar->addSpacing(12);
+        m_formatStatus = new QLabel("Format: detecting", this);
+        m_formatStatus->setToolTip("Detected log format");
+        m_formatStatus->setStyleSheet("color:#6c757d;");
+        statusBar->addWidget(m_formatStatus);
+        statusBar->addSpacing(12);
 
         statusBar->addStretch();
         m_labelState = new QLabel("Loading...", this);
@@ -406,6 +416,30 @@ void LogWidget::onProgressUpdate(int fileId, qint64 bytesProcessed, qint64 total
     }
     m_labelLines->setText(QString::number(linesProcessed));
     m_totalLines = linesProcessed;
+}
+
+void LogWidget::onFormatDetected(int fileId, LogFormatDetectionResult result) {
+    if (fileId != m_fileId) {
+        return;
+    }
+
+    m_formatDetection = result;
+    MetadataPipeline::instance().setDetectedFormat(fileId, result);
+    if (!m_formatStatus) {
+        return;
+    }
+    if (!result.detected) {
+        m_formatStatus->setText("Format: plain text");
+        m_formatStatus->setToolTip("No known format matched the sampled lines");
+        return;
+    }
+
+    m_formatStatus->setText(QString("Format: %1").arg(result.format.displayName()));
+    m_formatStatus->setToolTip(QString("%1\nMatched %2/%3 sampled lines\nSource: %4")
+        .arg(result.format.description.isEmpty() ? result.format.displayName() : result.format.description)
+        .arg(result.matchedLines)
+        .arg(result.sampledLines)
+        .arg(result.format.source));
 }
 
 void LogWidget::onChunkInserted(int fileId, qint32 totalLinesInserted) {
@@ -670,7 +704,6 @@ void LogWidget::applyBufferToView() {
 
 QString LogWidget::buildRowHtml(const QVector<QString>& row, const QMap<QString, int>& jsonFieldWidths) const {
     const int lineNumberIdx = m_bufferHeaders.indexOf("line_number");
-    const int timestampIdx = m_bufferHeaders.indexOf("timestamp_text");
     const int levelIdx = m_bufferHeaders.indexOf("level");
 
     QStringList parts;
@@ -684,10 +717,10 @@ QString LogWidget::buildRowHtml(const QVector<QString>& row, const QMap<QString,
                      .arg(displayNumber.toHtmlEscaped());
     }
 
-    if (m_showTimestampCheck && m_showTimestampCheck->isChecked()
-        && timestampIdx >= 0 && timestampIdx < row.size() && !row[timestampIdx].isEmpty()) {
+    const QString timestampText = timestampDisplayText(row);
+    if (m_showTimestampCheck && m_showTimestampCheck->isChecked() && !timestampText.isEmpty()) {
         parts << QString("<span style=\"color:#6c757d;\">%1</span>")
-                     .arg(row[timestampIdx].toHtmlEscaped());
+                     .arg(timestampText.toHtmlEscaped());
     }
 
     if (m_showLogLevelCheck && m_showLogLevelCheck->isChecked()
@@ -725,6 +758,33 @@ QString LogWidget::buildRowHtml(const QVector<QString>& row, const QMap<QString,
     const QString display = formatJsonLine(rawText, jsonFieldWidths);
     const QString raw = highlightFindWords(display);
     return prefix + raw + "\n";
+}
+
+QString LogWidget::timestampDisplayText(const QVector<QString>& row) const {
+    const int timestampIdx = m_bufferHeaders.indexOf("timestamp_text");
+    const int epochIdx = m_bufferHeaders.indexOf("timestamp_epoch_ms");
+    const QString original = timestampIdx >= 0 && timestampIdx < row.size() ? row[timestampIdx] : QString();
+    if (m_timestampDisplayMode == "original") {
+        return original;
+    }
+
+    bool ok = false;
+    const qint64 epochMs = epochIdx >= 0 && epochIdx < row.size() ? row[epochIdx].toLongLong(&ok) : -1;
+    if (!ok || epochMs < 0) {
+        return original;
+    }
+
+    const QDateTime dateTime = QDateTime::fromMSecsSinceEpoch(epochMs);
+    if (m_timestampDisplayMode == "iso-local") {
+        return dateTime.toLocalTime().toString(Qt::ISODateWithMs);
+    }
+    if (m_timestampDisplayMode == "custom") {
+        const QString format = m_timestampCustomFormat.trimmed().isEmpty()
+            ? QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")
+            : m_timestampCustomFormat.trimmed();
+        return dateTime.toLocalTime().toString(format);
+    }
+    return dateTime.toUTC().toString(Qt::ISODateWithMs);
 }
 
 QString LogWidget::formatJsonLine(const QString& raw, const QMap<QString, int>& jsonFieldWidths) const {
@@ -952,6 +1012,9 @@ QStringList LogWidget::currentFindWords() const {
 void LogWidget::loadSettings() {
     QSettings settings("Logalizer", "Logalizer");
     m_searchHistoryLimit = AppSettings::searchHistoryLimit();
+    const AppSettingsValues appSettings = AppSettings::load();
+    m_timestampDisplayMode = appSettings.timestampDisplayMode;
+    m_timestampCustomFormat = appSettings.timestampCustomFormat;
 
     loadComboHistory(m_searchCombo, m_ftsFilterHistory, "logWidget/ftsFilterHistory");
     loadComboHistory(m_jsonFieldFilterCombo, m_jsonFieldFilterHistory, "logWidget/jsonFieldFilterHistory");
@@ -972,7 +1035,6 @@ void LogWidget::loadSettings() {
     if (m_sortTimestampCheck) {
         m_sortTimestampCheck->setChecked(settings.value("logWidget/sortByTimestamp", false).toBool());
     }
-    const AppSettingsValues appSettings = AppSettings::load();
     if (m_jsonHelperCheck) {
         m_jsonHelperCheck->setChecked(appSettings.jsonEnabled);
     }
