@@ -74,6 +74,7 @@ LogWidget::LogWidget(SourceType sourceType, const QString& displayName, int file
 
         connect(m_workerThread, &QThread::started, m_worker, &FileWorker::start);
         connect(m_worker, &FileWorker::progressUpdate, this, &LogWidget::onProgressUpdate);
+        connect(m_worker, &FileWorker::formatDetected, this, &LogWidget::onFormatDetected);
         connect(m_worker, &FileWorker::chunkInserted, this, &LogWidget::onChunkInserted);
         connect(m_worker, &FileWorker::finished, this, &LogWidget::onFinished);
         connect(m_worker, &FileWorker::error, this, &LogWidget::onError);
@@ -84,6 +85,7 @@ LogWidget::LogWidget(SourceType sourceType, const QString& displayName, int file
 
         connect(m_workerThread, &QThread::started, m_streamWorker, &StreamWorker::start);
         connect(m_streamWorker, &StreamWorker::progressUpdate, this, &LogWidget::onProgressUpdate);
+        connect(m_streamWorker, &StreamWorker::formatDetected, this, &LogWidget::onFormatDetected);
         connect(m_streamWorker, &StreamWorker::chunkInserted, this, &LogWidget::onChunkInserted);
         connect(m_streamWorker, &StreamWorker::finished, this, &LogWidget::onFinished);
         connect(m_streamWorker, &StreamWorker::error, this, &LogWidget::onError);
@@ -94,6 +96,7 @@ LogWidget::LogWidget(SourceType sourceType, const QString& displayName, int file
 
         connect(m_workerThread, &QThread::started, m_processWorker, &ProcessWorker::start);
         connect(m_processWorker, &ProcessWorker::progressUpdate, this, &LogWidget::onProgressUpdate);
+        connect(m_processWorker, &ProcessWorker::formatDetected, this, &LogWidget::onFormatDetected);
         connect(m_processWorker, &ProcessWorker::chunkInserted, this, &LogWidget::onChunkInserted);
         connect(m_processWorker, &ProcessWorker::finished, this, &LogWidget::onFinished);
         connect(m_processWorker, &ProcessWorker::error, this, &LogWidget::onError);
@@ -377,6 +380,11 @@ void LogWidget::setupUi() {
         m_metadataStatus->setStyleSheet("color:#6c757d;");
         statusBar->addWidget(m_metadataStatus);
         statusBar->addSpacing(12);
+        m_formatStatus = new QLabel("Format: detecting", this);
+        m_formatStatus->setToolTip("Detected log format");
+        m_formatStatus->setStyleSheet("color:#6c757d;");
+        statusBar->addWidget(m_formatStatus);
+        statusBar->addSpacing(12);
 
         statusBar->addStretch();
         m_labelState = new QLabel("Loading...", this);
@@ -406,6 +414,30 @@ void LogWidget::onProgressUpdate(int fileId, qint64 bytesProcessed, qint64 total
     }
     m_labelLines->setText(QString::number(linesProcessed));
     m_totalLines = linesProcessed;
+}
+
+void LogWidget::onFormatDetected(int fileId, LogFormatDetectionResult result) {
+    if (fileId != m_fileId) {
+        return;
+    }
+
+    m_formatDetection = result;
+    MetadataPipeline::instance().setDetectedFormat(fileId, result);
+    if (!m_formatStatus) {
+        return;
+    }
+    if (!result.detected) {
+        m_formatStatus->setText("Format: plain text");
+        m_formatStatus->setToolTip("No known format matched the sampled lines");
+        return;
+    }
+
+    m_formatStatus->setText(QString("Format: %1").arg(result.format.displayName()));
+    m_formatStatus->setToolTip(QString("%1\nMatched %2/%3 sampled lines\nSource: %4")
+        .arg(result.format.description.isEmpty() ? result.format.displayName() : result.format.description)
+        .arg(result.matchedLines)
+        .arg(result.sampledLines)
+        .arg(result.format.source));
 }
 
 void LogWidget::onChunkInserted(int fileId, qint32 totalLinesInserted) {

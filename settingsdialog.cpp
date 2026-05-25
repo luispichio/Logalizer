@@ -5,6 +5,7 @@
 #include <QFormLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QVBoxLayout>
@@ -113,6 +114,27 @@ void SettingsDialog::setupUi() {
         auto* layout = new QFormLayout(page);
         layout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
+        m_formatDetectionEnabled = new QCheckBox("Enable automatic format detection", page);
+        m_formatDetectionSampleLines = spinBox(page, 10, 5000, 50);
+        m_formatDetectionUserDirectory = new QLineEdit(page);
+        m_formatDetectionCustomJson = new QPlainTextEdit(page);
+        m_formatDetectionCustomJson->setPlaceholderText("{\n  \"my_format\": {\n    \"regex\": {\n      \"line\": { \"pattern\": \"...\" }\n    },\n    \"timestamp-field\": \"timestamp\",\n    \"level-field\": \"level\"\n  }\n}");
+        m_formatDetectionCustomJson->setMinimumHeight(120);
+
+        layout->addRow(m_formatDetectionEnabled);
+        layout->addRow("Sample lines:", m_formatDetectionSampleLines);
+        layout->addRow("User formats directory:", m_formatDetectionUserDirectory);
+        layout->addRow("Custom definitions JSON:", m_formatDetectionCustomJson);
+        layout->addRow(noteLabel("Supports a tolerant subset of LNAV format definitions. Unknown properties are ignored.", page));
+
+        tabs->addTab(page, "Format Detection");
+    }
+
+    {
+        auto* page = new QWidget(tabs);
+        auto* layout = new QFormLayout(page);
+        layout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+
         m_aiEnabled = new QCheckBox("Enable AI features", page);
         m_aiProvider = new QLineEdit(page);
         m_aiEndpoint = new QLineEdit(page);
@@ -155,6 +177,11 @@ void SettingsDialog::loadValues(const AppSettingsValues& values) {
     m_metadataRegexScanLimit->setValue(values.metadataRegexScanLimit);
     m_metadataPreferRegexRules->setChecked(values.metadataPreferRegexRules);
 
+    m_formatDetectionEnabled->setChecked(values.formatDetectionEnabled);
+    m_formatDetectionSampleLines->setValue(values.formatDetectionSampleLines);
+    m_formatDetectionUserDirectory->setText(values.formatDetectionUserDirectory);
+    m_formatDetectionCustomJson->setPlainText(values.formatDetectionCustomJson);
+
     m_aiEnabled->setChecked(values.aiEnabled);
     m_aiProvider->setText(values.aiProvider);
     m_aiEndpoint->setText(values.aiEndpoint);
@@ -179,6 +206,11 @@ AppSettingsValues SettingsDialog::values() const {
 
     values.metadataRegexScanLimit = m_metadataRegexScanLimit->value();
     values.metadataPreferRegexRules = m_metadataPreferRegexRules->isChecked();
+
+    values.formatDetectionEnabled = m_formatDetectionEnabled->isChecked();
+    values.formatDetectionSampleLines = m_formatDetectionSampleLines->value();
+    values.formatDetectionUserDirectory = m_formatDetectionUserDirectory->text();
+    values.formatDetectionCustomJson = m_formatDetectionCustomJson->toPlainText();
 
     values.aiEnabled = m_aiEnabled->isChecked();
     values.aiProvider = m_aiProvider->text();

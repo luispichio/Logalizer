@@ -1,5 +1,6 @@
 #include "processworker.h"
 #include "appsettings.h"
+#include "formatdetector.h"
 #include "loglinestore.h"
 #include "logdatabase.h"
 #include "metadatapipeline.h"
@@ -11,7 +12,7 @@
 #include <QtCore/QtLogging>
 
 ProcessWorker::ProcessWorker(const QString& command, int fileId, QObject* parent)
-    : QObject(parent), m_command(command), m_fileId(fileId), m_batchSize(AppSettings::processBatchSize())
+    : QObject(parent), m_command(command), m_fileId(fileId), m_batchSize(AppSettings::processBatchSize()), m_sampleLineLimit(AppSettings::formatDetectionSampleLines())
 {
     m_batch.reserve(m_batchSize);
 }
@@ -122,6 +123,9 @@ void ProcessWorker::flushCompleteLines() {
         m_pending.remove(0, newlineIndex + 1);
 
         const QString line = QString::fromUtf8(lineBytes);
+        if (!m_formatDetectionEmitted && m_sampleLines.size() < m_sampleLineLimit && !line.trimmed().isEmpty()) {
+            m_sampleLines.append(line.trimmed());
+        }
         if (auto store = LogLineStoreRegistry::instance().store(m_fileId).dynamicCast<SpillLineStore>()) {
             store->appendLine(lineBytes, m_logicalPosition);
         }
@@ -141,6 +145,10 @@ void ProcessWorker::flushBatch() {
     }
 
     LogDatabase::instance().insertBatch(m_fileId, m_batch);
+    if (!m_formatDetectionEmitted) {
+        emit formatDetected(m_fileId, FormatDetector::detect(m_command, m_sampleLines));
+        m_formatDetectionEmitted = true;
+    }
     MetadataPipeline::instance().enqueueBatch(m_fileId, m_batch);
     m_batch.clear();
 
@@ -160,6 +168,9 @@ void ProcessWorker::flushRemainder() {
     m_pending.clear();
 
     const QString line = QString::fromUtf8(lineBytes);
+    if (!m_formatDetectionEmitted && m_sampleLines.size() < m_sampleLineLimit && !line.trimmed().isEmpty()) {
+        m_sampleLines.append(line.trimmed());
+    }
     if (auto store = LogLineStoreRegistry::instance().store(m_fileId).dynamicCast<SpillLineStore>()) {
         store->appendLine(lineBytes, m_logicalPosition);
     }

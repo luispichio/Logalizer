@@ -99,6 +99,12 @@ void MetadataPipeline::enqueueBatch(int fileId, const QVector<LineRecord>& recor
     {
         QMutexLocker locker(&m_mutex);
         config = m_detectionConfig;
+        const LogFormatDetectionResult formatResult = m_formatByFile.value(fileId);
+        if (formatResult.detected) {
+            config.hasFormat = true;
+            config.format = formatResult.format;
+            config.formatPatternName = formatResult.patternName;
+        }
     }
     m_parserPool.start(new ParseMetadataTask(fileId, std::move(lines), config));
 }
@@ -106,6 +112,7 @@ void MetadataPipeline::enqueueBatch(int fileId, const QVector<LineRecord>& recor
 void MetadataPipeline::cancelFile(int fileId) {
     QMutexLocker locker(&m_mutex);
     m_cancelledFileIds.insert(fileId);
+    m_formatByFile.remove(fileId);
 
     for (int i = m_pendingWrites.size() - 1; i >= 0; --i) {
         if (m_pendingWrites.at(i).first == fileId) {
@@ -126,6 +133,20 @@ MetadataProgress MetadataPipeline::progress(int fileId) const {
 void MetadataPipeline::reloadConfig() {
     QMutexLocker locker(&m_mutex);
     m_detectionConfig = loadMetadataDetectionConfig();
+}
+
+void MetadataPipeline::setDetectedFormat(int fileId, const LogFormatDetectionResult& result) {
+    QMutexLocker locker(&m_mutex);
+    if (result.detected) {
+        m_formatByFile.insert(fileId, result);
+    } else {
+        m_formatByFile.remove(fileId);
+    }
+}
+
+LogFormatDetectionResult MetadataPipeline::detectedFormat(int fileId) const {
+    QMutexLocker locker(&m_mutex);
+    return m_formatByFile.value(fileId);
 }
 
 void MetadataPipeline::shutdown() {

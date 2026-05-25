@@ -55,6 +55,8 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         MANUAL_FINALIZATION
         ${PROJECT_SOURCES}
         appsettings.h appsettings.cpp
+        logformat.h logformat.cpp
+        formatdetector.h formatdetector.cpp
         settingsdialog.h settingsdialog.cpp
         logwidget.h logwidget.cpp
         linerecord.h

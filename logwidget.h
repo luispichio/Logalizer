@@ -7,6 +7,7 @@
 #include <QWidget>
 #include <QMap>
 #include "logdatabase.h"
+#include "logformat.h"
 
 class FileWorker;
 class ProcessWorker;
@@ -45,6 +46,7 @@ signals:
 
 private slots:
     void onProgressUpdate(int fileId, qint64 bytesProcessed, qint64 totalBytes, qint32 linesProcessed);
+    void onFormatDetected(int fileId, LogFormatDetectionResult result);
     void onChunkInserted(int fileId, qint32 totalLinesInserted);
     void onFinished(int fileId);
     void onError(int fileId, QString message);
@@ -145,6 +147,7 @@ private:
     QLabel* m_labelLines = nullptr;
     QLabel* m_labelState = nullptr;
     QLabel* m_metadataStatus = nullptr;
+    QLabel* m_formatStatus = nullptr;
     QProgressBar* m_progressBar = nullptr;
 
     int m_bufferPointer = 0;
@@ -153,6 +156,7 @@ private:
 
     qint64 m_fileSize = 0;
     qint32 m_totalLines = 0;
+    LogFormatDetectionResult m_formatDetection;
 };
 
 #endif // LOGWIDGET_H

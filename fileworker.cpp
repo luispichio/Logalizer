@@ -1,5 +1,6 @@
 #include "fileworker.h"
 #include "appsettings.h"
+#include "formatdetector.h"
 #include "loglinestore.h"
 #include "logdatabase.h"
 #include "metadatapipeline.h"
@@ -9,7 +10,7 @@
 #include <QtCore/QtLogging>
 
 FileWorker::FileWorker(const QString& fileName, int fileId, QObject* parent)
-    : QObject(parent), m_fileName(fileName), m_fileId(fileId), m_batchSize(AppSettings::fileBatchSize()) {}
+    : QObject(parent), m_fileName(fileName), m_fileId(fileId), m_batchSize(AppSettings::fileBatchSize()), m_sampleLineLimit(AppSettings::formatDetectionSampleLines()) {}
 
 FileWorker::~FileWorker() {}
 
@@ -54,6 +55,16 @@ void FileWorker::doWork() {
     batch.reserve(m_batchSize);
 
     const qint32 totalLines = store->lineCount();
+    QStringList sampleLines;
+    sampleLines.reserve(qMin<int>(m_sampleLineLimit, totalLines));
+    for (qint32 lineNumber = 0; lineNumber < totalLines && sampleLines.size() < m_sampleLineLimit; ++lineNumber) {
+        const QString line = QString::fromUtf8(store->lineBytes(lineNumber)).trimmed();
+        if (!line.isEmpty()) {
+            sampleLines.append(line);
+        }
+    }
+    emit formatDetected(m_fileId, FormatDetector::detect(m_fileName, sampleLines));
+
     qint64 bytesProcessed = 0;
 
     for (qint32 lineNumber = 0; lineNumber < totalLines; ++lineNumber) {

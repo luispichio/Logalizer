@@ -1,5 +1,6 @@
 #include "appsettings.h"
 
+#include <QStandardPaths>
 #include <QSettings>
 
 namespace {
@@ -10,6 +11,7 @@ constexpr int DefaultFileBatchSize = 2000;
 constexpr int DefaultStreamBatchSize = 10000;
 constexpr int DefaultProcessBatchSize = 10000;
 constexpr int DefaultMetadataRegexScanLimit = 1024;
+constexpr int DefaultFormatDetectionSampleLines = 200;
 
 int boundedInt(const QSettings& settings, const char* key, int defaultValue, int minValue, int maxValue) {
     return qBound(minValue, settings.value(key, defaultValue).toInt(), maxValue);
@@ -35,6 +37,12 @@ AppSettingsValues AppSettings::load() {
 
     values.metadataRegexScanLimit = boundedInt(settings, "metadata/regexScanLimit", DefaultMetadataRegexScanLimit, 128, 8192);
     values.metadataPreferRegexRules = settings.value("metadata/preferRegexRules", false).toBool();
+
+    const QString defaultFormatsDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/formats";
+    values.formatDetectionEnabled = settings.value("formatDetection/enabled", true).toBool();
+    values.formatDetectionSampleLines = boundedInt(settings, "formatDetection/sampleLines", DefaultFormatDetectionSampleLines, 10, 5000);
+    values.formatDetectionUserDirectory = settings.value("formatDetection/userDirectory", defaultFormatsDir).toString();
+    values.formatDetectionCustomJson = settings.value("formatDetection/customDefinitionsJson", QString()).toString();
 
     values.aiEnabled = settings.value("ai/enabled", false).toBool();
     values.aiProvider = settings.value("ai/provider", QString()).toString();
@@ -62,6 +70,11 @@ void AppSettings::save(const AppSettingsValues& values) {
 
     settings.setValue("metadata/regexScanLimit", qBound(128, values.metadataRegexScanLimit, 8192));
     settings.setValue("metadata/preferRegexRules", values.metadataPreferRegexRules);
+
+    settings.setValue("formatDetection/enabled", values.formatDetectionEnabled);
+    settings.setValue("formatDetection/sampleLines", qBound(10, values.formatDetectionSampleLines, 5000));
+    settings.setValue("formatDetection/userDirectory", values.formatDetectionUserDirectory.trimmed());
+    settings.setValue("formatDetection/customDefinitionsJson", values.formatDetectionCustomJson.trimmed());
 
     settings.setValue("ai/enabled", values.aiEnabled);
     settings.setValue("ai/provider", values.aiProvider.trimmed());
@@ -91,4 +104,12 @@ int AppSettings::streamBatchSize() {
 
 int AppSettings::processBatchSize() {
     return load().processBatchSize;
+}
+
+bool AppSettings::formatDetectionEnabled() {
+    return load().formatDetectionEnabled;
+}
+
+int AppSettings::formatDetectionSampleLines() {
+    return load().formatDetectionSampleLines;
 }

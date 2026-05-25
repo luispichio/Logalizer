@@ -1,5 +1,6 @@
 #include "streamworker.h"
 #include "appsettings.h"
+#include "formatdetector.h"
 #include "loglinestore.h"
 #include "logdatabase.h"
 #include "metadatapipeline.h"
@@ -11,7 +12,7 @@
 #include <cstdio>
 
 StreamWorker::StreamWorker(int fileId, QObject* parent)
-    : QObject(parent), m_fileId(fileId), m_batchSize(AppSettings::streamBatchSize()) {}
+    : QObject(parent), m_fileId(fileId), m_batchSize(AppSettings::streamBatchSize()), m_sampleLineLimit(AppSettings::formatDetectionSampleLines()) {}
 
 StreamWorker::~StreamWorker() {}
 
@@ -54,12 +55,19 @@ void StreamWorker::doWork() {
 
         const QString line = stream.readLine();
         const QByteArray lineBytes = line.toUtf8();
+        if (!m_formatDetectionEmitted && m_sampleLines.size() < m_sampleLineLimit && !line.trimmed().isEmpty()) {
+            m_sampleLines.append(line.trimmed());
+        }
         store->appendLine(lineBytes, logicalPosition);
         batch.append(LineRecord(line, logicalPosition, lineNumber));
         logicalPosition += lineBytes.size() + 1;
         ++lineNumber;
 
         if (batch.size() >= m_batchSize) {
+            if (!m_formatDetectionEmitted) {
+                emit formatDetected(m_fileId, FormatDetector::detect("stdin", m_sampleLines));
+                m_formatDetectionEmitted = true;
+            }
             LogDatabase::instance().insertBatch(m_fileId, batch);
             MetadataPipeline::instance().enqueueBatch(m_fileId, batch);
             batch.clear();
@@ -70,6 +78,10 @@ void StreamWorker::doWork() {
     }
 
     if (!batch.isEmpty()) {
+        if (!m_formatDetectionEmitted) {
+            emit formatDetected(m_fileId, FormatDetector::detect("stdin", m_sampleLines));
+            m_formatDetectionEmitted = true;
+        }
         LogDatabase::instance().insertBatch(m_fileId, batch);
         MetadataPipeline::instance().enqueueBatch(m_fileId, batch);
         emit chunkInserted(m_fileId, lineNumber);

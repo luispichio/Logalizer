@@ -20,6 +20,11 @@ struct AppSettingsValues {
     int metadataRegexScanLimit = 1024;
     bool metadataPreferRegexRules = false;
 
+    bool formatDetectionEnabled = true;
+    int formatDetectionSampleLines = 200;
+    QString formatDetectionUserDirectory;
+    QString formatDetectionCustomJson;
+
     bool aiEnabled = false;
     QString aiProvider;
     QString aiEndpoint;
@@ -38,6 +43,8 @@ public:
     static int fileBatchSize();
     static int streamBatchSize();
     static int processBatchSize();
+    static bool formatDetectionEnabled();
+    static int formatDetectionSampleLines();
 };
 
 #endif // APPSETTINGS_H

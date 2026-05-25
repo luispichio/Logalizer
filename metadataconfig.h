@@ -5,6 +5,8 @@
 #include <QString>
 #include <QVector>
 
+#include "logformat.h"
+
 struct MetadataRegexRule {
     QString name;
     QString pattern;
@@ -22,6 +24,9 @@ struct CompiledMetadataRegexRule {
 struct MetadataDetectionConfig {
     QVector<CompiledMetadataRegexRule> timestampRules;
     QVector<CompiledMetadataRegexRule> levelRules;
+    LogFormatDefinition format;
+    QString formatPatternName;
+    bool hasFormat = false;
     int regexScanLimit = 1024;
     bool preferRegexRules = false;
 };

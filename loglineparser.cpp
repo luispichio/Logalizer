@@ -1,6 +1,8 @@
 #include "loglineparser.h"
 
 #include <QDateTime>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRegularExpressionMatch>
 #include <QtGlobal>
 
@@ -121,6 +123,95 @@ LogLevel levelFromText(const QString& text) {
         return LogLevel::Fatal;
     }
     return LogLevel::Unknown;
+}
+
+QString jsonValueForPath(const QJsonObject& object, const QString& path) {
+    QJsonValue value = object;
+    for (const QString& part : path.split('.', Qt::SkipEmptyParts)) {
+        if (!value.isObject()) {
+            return QString();
+        }
+        value = value.toObject().value(part);
+    }
+
+    if (value.isString()) {
+        return value.toString();
+    }
+    if (value.isDouble()) {
+        return QString::number(value.toDouble(), 'g', 15);
+    }
+    if (value.isBool()) {
+        return value.toBool() ? "true" : "false";
+    }
+    return QString();
+}
+
+LogLevel levelFromFormat(const QString& value, const LogFormatDefinition& format) {
+    const LogLevel direct = levelFromText(value);
+    if (direct != LogLevel::Unknown) {
+        return direct;
+    }
+
+    for (auto it = format.levelPatterns.constBegin(); it != format.levelPatterns.constEnd(); ++it) {
+        const QString pattern = it.value();
+        if (pattern.isEmpty()) {
+            continue;
+        }
+        const QRegularExpression regex(pattern, QRegularExpression::CaseInsensitiveOption);
+        if ((regex.isValid() && regex.match(value).hasMatch()) || value.compare(pattern, Qt::CaseInsensitive) == 0) {
+            return levelFromText(it.key());
+        }
+    }
+    return LogLevel::Unknown;
+}
+
+ParsedLineMetadata parseFormatJson(QStringView line, const LogFormatDefinition& format) {
+    ParsedLineMetadata metadata;
+    QJsonParseError error;
+    const QJsonDocument doc = QJsonDocument::fromJson(line.toString().toUtf8(), &error);
+    if (error.error != QJsonParseError::NoError || !doc.isObject()) {
+        return metadata;
+    }
+
+    const QJsonObject object = doc.object();
+    if (!format.timestampField.isEmpty()) {
+        metadata.timestampText = jsonValueForPath(object, format.timestampField);
+    }
+    if (!format.levelField.isEmpty()) {
+        metadata.level = levelFromFormat(jsonValueForPath(object, format.levelField), format);
+    }
+    return metadata;
+}
+
+ParsedLineMetadata parseFormatRegex(QStringView line, const LogFormatDefinition& format, const QString& patternName) {
+    ParsedLineMetadata metadata;
+    for (const LogFormatPattern& pattern : format.patterns) {
+        if (!patternName.isEmpty() && pattern.name != patternName) {
+            continue;
+        }
+
+        const QRegularExpressionMatch match = pattern.regex.match(line.toString());
+        if (!match.hasMatch()) {
+            continue;
+        }
+        if (!format.timestampField.isEmpty()) {
+            metadata.timestampText = match.captured(format.timestampField).trimmed();
+        }
+        if (!format.levelField.isEmpty()) {
+            metadata.level = levelFromFormat(match.captured(format.levelField), format);
+        }
+        return metadata;
+    }
+    return metadata;
+}
+
+ParsedLineMetadata parseFormatMetadata(QStringView line, const MetadataDetectionConfig& config) {
+    if (!config.hasFormat) {
+        return ParsedLineMetadata{};
+    }
+    return config.format.json
+        ? parseFormatJson(line, config.format)
+        : parseFormatRegex(line, config.format, config.formatPatternName);
 }
 
 QString detectTimestampByRegex(QStringView line, const MetadataDetectionConfig& config) {
@@ -307,10 +398,14 @@ ParsedLineMetadata parseLineMetadata(QStringView line) {
 }
 
 ParsedLineMetadata parseLineMetadata(QStringView line, const MetadataDetectionConfig& config) {
-    ParsedLineMetadata metadata;
+    ParsedLineMetadata metadata = parseFormatMetadata(line, config);
     if (config.preferRegexRules) {
-        metadata.timestampText = detectTimestampByRegex(line, config);
-        metadata.level = detectLevelByRegex(line, config);
+        if (metadata.timestampText.isEmpty()) {
+            metadata.timestampText = detectTimestampByRegex(line, config);
+        }
+        if (metadata.level == LogLevel::Unknown) {
+            metadata.level = detectLevelByRegex(line, config);
+        }
     }
 
     if (metadata.timestampText.isEmpty()) {
