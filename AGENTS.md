@@ -78,6 +78,7 @@ MainWindow
 - Usar `QSettings("Logalizer", "Logalizer")` para preferencias simples, historiales y lista de recientes.
 - No persistir contenido de logs ni resultados FTS en configuración.
 - La lista de recientes guarda solo rutas de archivos; no reabrir sesiones automáticamente salvo requerimiento explícito.
+- Tener extremo cuidado al registrar `eventFilter` en `QTextBrowser` o en su `viewport()`: `Resize`, `Wheel` y cambios de HTML pueden retroalimentarse y bloquear la UI. Para menú contextual u otras acciones puntuales, preferir señales específicas como `customContextMenuRequested` antes que ampliar el alcance del `eventFilter`.
 
 ## 🧾 Persistencia por Línea
 
@@ -119,6 +120,7 @@ MainWindow
 | Abrir conexiones SQLite adicionales | usar `LogDatabase::instance()` |
 | Reintroducir `.ui` o Qt Designer | mantener UI programática |
 | Llamar `refreshData()` en cada chunk | render inicial si el buffer está vacío y luego usar debounce |
+| Registrar `eventFilter` extra en `QTextBrowser::viewport()` para acciones simples | usar señales específicas (`customContextMenuRequested`, shortcuts, slots) y no mezclarlo con lógica de resize/render |
 | Persistir contenido de logs en `QSettings` | persistir solo preferencias, historiales y rutas recientes |
 
 ## 📌 Roadmap Prioritario

@@ -8,6 +8,8 @@
 #include "loglineparser.h"
 
 #include <QCheckBox>
+#include <QApplication>
+#include <QClipboard>
 #include <QComboBox>
 #include <QEvent>
 #include <QFileInfo>
@@ -22,6 +24,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -44,6 +47,12 @@ QStringList splitJsonFilterTokens(const QString& text) {
     QString normalized = text;
     normalized.replace(',', ' ');
     return normalized.simplified().split(' ', Qt::SkipEmptyParts);
+}
+
+QString ftsPhraseForText(QString text) {
+    text = text.simplified();
+    text.replace('"', "\"\"");
+    return QString("\"%1\"").arg(text);
 }
 }
 
@@ -361,6 +370,14 @@ void LogWidget::setupUi() {
         m_mainLayout->addWidget(viewContainer, 1);
 
         m_textBrowser->installEventFilter(this);
+        m_textBrowser->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(m_textBrowser, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+            if (!m_textBrowser) {
+                return;
+            }
+            const QPoint viewportPos = m_textBrowser->viewport()->mapFrom(m_textBrowser, pos);
+            showLogContextMenu(viewportPos, m_textBrowser->mapToGlobal(pos));
+        });
     }
 
     {
@@ -1007,6 +1024,153 @@ QStringList LogWidget::currentFindWords() const {
         }
     }
     return words;
+}
+
+QString LogWidget::normalizedSelectedText() const {
+    if (!m_textBrowser) {
+        return {};
+    }
+
+    QString text = m_textBrowser->textCursor().selectedText();
+    text.replace(QChar::ParagraphSeparator, ' ');
+    text.replace(QChar::LineSeparator, ' ');
+    return text.simplified();
+}
+
+QString LogWidget::rawLineForBlock(int blockNumber) const {
+    if (blockNumber < 0 || blockNumber >= m_buffer.size()) {
+        return {};
+    }
+
+    const int lineNumberIdx = m_bufferHeaders.indexOf("line_number");
+    if (lineNumberIdx < 0 || lineNumberIdx >= m_buffer[blockNumber].size()) {
+        return {};
+    }
+
+    bool ok = false;
+    const int lineNumber = m_buffer[blockNumber][lineNumberIdx].toInt(&ok);
+    const auto store = LogLineStoreRegistry::instance().store(m_fileId);
+    if (!ok || !store) {
+        return {};
+    }
+    return store->lineText(lineNumber);
+}
+
+QString LogWidget::sanitizedJsonPathSelection(const QString& text) const {
+    QString path = text.simplified();
+    const int equals = path.indexOf('=');
+    if (equals >= 0) {
+        path = path.left(equals).trimmed();
+    }
+    if (path.startsWith('-')) {
+        path.remove(0, 1);
+    }
+    return isValidJsonFieldPath(path) ? path : QString();
+}
+
+bool LogWidget::isValidJsonFieldPath(const QString& path) const {
+    if (path.isEmpty()) {
+        return false;
+    }
+
+    static const QRegularExpression fieldPathRe(
+        QStringLiteral(R"(^[A-Za-z0-9_:@-]+(\.[A-Za-z0-9_:@-]+)*(\.\*)?$)"));
+    return fieldPathRe.match(path).hasMatch();
+}
+
+void LogWidget::showLogContextMenu(const QPoint& viewportPos, const QPoint& globalPos) {
+    if (!m_textBrowser) {
+        return;
+    }
+
+    const QString selection = normalizedSelectedText();
+    const bool hasSelection = !selection.isEmpty();
+    const QString jsonPath = sanitizedJsonPathSelection(selection);
+    const bool jsonActionsEnabled = hasSelection
+        && m_jsonHelperCheck
+        && m_jsonHelperCheck->isChecked()
+        && !jsonPath.isEmpty();
+    const int blockNumber = m_textBrowser->cursorForPosition(viewportPos).blockNumber();
+    const QString rawLine = rawLineForBlock(blockNumber);
+
+    QMenu menu(this);
+    QAction* addFilter = menu.addAction("Add selection to filter");
+    addFilter->setEnabled(hasSelection);
+    QAction* excludeFilter = menu.addAction("Exclude selection from filter");
+    excludeFilter->setEnabled(hasSelection && m_searchCombo && !m_searchCombo->currentText().trimmed().isEmpty());
+    menu.addSeparator();
+    QAction* addJsonInclude = menu.addAction("Add selection as JSON field include rule");
+    addJsonInclude->setEnabled(jsonActionsEnabled);
+    QAction* addJsonExclude = menu.addAction("Add selection as JSON field exclude rule");
+    addJsonExclude->setEnabled(jsonActionsEnabled);
+    menu.addSeparator();
+    QAction* copySelection = menu.addAction("Copy selection");
+    copySelection->setEnabled(hasSelection);
+    QAction* copyLine = menu.addAction("Copy full line");
+    copyLine->setEnabled(!rawLine.isEmpty());
+
+    QAction* chosen = menu.exec(globalPos);
+    if (!chosen) {
+        return;
+    }
+
+    if (chosen == addFilter) {
+        appendFtsSelectionFilter(selection, false);
+    } else if (chosen == excludeFilter) {
+        appendFtsSelectionFilter(selection, true);
+    } else if (chosen == addJsonInclude) {
+        appendJsonFieldFilterRule(jsonPath, false);
+    } else if (chosen == addJsonExclude) {
+        appendJsonFieldFilterRule(jsonPath, true);
+    } else if (chosen == copySelection) {
+        QApplication::clipboard()->setText(selection);
+    } else if (chosen == copyLine) {
+        QApplication::clipboard()->setText(rawLine);
+    }
+}
+
+void LogWidget::appendFtsSelectionFilter(const QString& text, bool exclude) {
+    if (!m_searchCombo) {
+        return;
+    }
+
+    const QString phrase = ftsPhraseForText(text);
+    if (phrase == "\"\"") {
+        return;
+    }
+
+    const QString current = m_searchCombo->currentText().trimmed();
+    QString next;
+    if (current.isEmpty()) {
+        if (exclude) {
+            return;
+        }
+        next = phrase;
+    } else {
+        next = exclude
+            ? QString("(%1) NOT %2").arg(current, phrase)
+            : QString("(%1) AND %2").arg(current, phrase);
+    }
+
+    m_searchCombo->setCurrentText(next);
+    onApplyFilters();
+}
+
+void LogWidget::appendJsonFieldFilterRule(const QString& path, bool exclude) {
+    if (!m_jsonFieldFilterCombo || path.isEmpty()) {
+        return;
+    }
+
+    const QString token = exclude ? QString("-%1").arg(path) : path;
+    QStringList tokens = splitJsonFilterTokens(m_jsonFieldFilterCombo->currentText());
+    if (!tokens.contains(token, Qt::CaseInsensitive)) {
+        tokens << token;
+    }
+
+    m_jsonFieldFilterCombo->setCurrentText(tokens.join(","));
+    rememberComboText(m_jsonFieldFilterCombo, m_jsonFieldFilterHistory, "logWidget/jsonFieldFilterHistory");
+    applyBufferToView();
+    saveSettings();
 }
 
 void LogWidget::loadSettings() {

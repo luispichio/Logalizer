@@ -85,6 +85,13 @@ private:
     bool jsonFieldAllowed(const QString& path) const;
     bool jsonPathMatches(const QString& path, const QString& pattern) const;
     QStringList currentFindWords() const;
+    QString normalizedSelectedText() const;
+    QString rawLineForBlock(int blockNumber) const;
+    QString sanitizedJsonPathSelection(const QString& text) const;
+    bool isValidJsonFieldPath(const QString& path) const;
+    void showLogContextMenu(const QPoint& viewportPos, const QPoint& globalPos);
+    void appendFtsSelectionFilter(const QString& text, bool exclude);
+    void appendJsonFieldFilterRule(const QString& path, bool exclude);
     int visibleRowCount() const;
     void updateScrollBar();
     void jumpToTextMatch(int fromLineNumber, bool backwards, const QString& notFoundText);

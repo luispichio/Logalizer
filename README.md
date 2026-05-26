@@ -9,7 +9,7 @@ Logalizer es una aplicación de escritorio para analizar logs con foco en abrir 
 - **Navegación por línea**: `rowid` representa el número de línea y permite mover el visor por puntero sin usar paginación por offset.
 - **Offset de archivo disponible**: cada línea conserva `file_position` como dato no indexado para usos posteriores.
 - **Multihilo y UI fluida**: la ingesta ocurre en un `QThread` con inserts por lotes y refresco con debounce para no bloquear la interfaz.
-- **Vista de texto enfocada**: el contenido se muestra en `QTextBrowser`, con wrap configurable, números de línea opcionales, búsqueda FTS5 global y búsqueda local dentro del buffer visible (`Ctrl+F`, `F3`, `Shift+F3`).
+- **Vista de texto enfocada**: el contenido se muestra en `QTextBrowser`, con wrap configurable, números de línea opcionales, búsqueda FTS5 global, búsqueda local dentro del buffer visible (`Ctrl+F`, `F3`, `Shift+F3`) y menú contextual para promover selecciones a filtros.
 - **JSON Helper**: permite formatear líneas JSON visibles, filtrar campos por ruta, mostrar formato compacto `key=value` o solo valores.
 - **Historial persistente**: los filtros FTS5, filtros de campos JSON y búsquedas locales se guardan como combos editables.
 - **Últimos archivos**: el menú `File > Recent Files` conserva los últimos archivos abiertos sin reabrirlos automáticamente.
@@ -24,6 +24,7 @@ Logalizer es una aplicación de escritorio para analizar logs con foco en abrir 
 - `Filter`: aplica una expresión FTS5 global sobre todo el contenido indexado.
 - `Find`: busca palabras dentro del conjunto filtrado y navega entre coincidencias.
 - `JSON`: activa ayuda visual para líneas JSON, con `Compact`, `Only values` y filtro de campos.
+- Menú contextual del visor: con texto seleccionado permite agregar o excluir la selección del filtro FTS5, agregar reglas de campos JSON cuando `JSON` está activo, copiar la selección o copiar la línea completa.
 
 ## Configuración Persistente
 
