@@ -46,6 +46,7 @@ Por cada archivo abierto se crea una tabla FTS5 in-memory:
   - case-sensitive opcional
 - Búsqueda FTS5 global sobre todo el archivo.
 - Navegación por puntero: la vista carga solo las filas necesarias para llenar el visor.
+- Menú contextual del visor para agregar texto seleccionado a filtros FTS5, excluir selecciones, agregar reglas de campos JSON y copiar selección o línea completa.
 
 ### 2.4 Rendimiento
 
