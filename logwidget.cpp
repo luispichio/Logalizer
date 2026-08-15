@@ -120,6 +120,7 @@ LogWidget::LogWidget(SourceType sourceType, const QString& displayName, int file
 LogWidget::~LogWidget() {
     saveSettings();
     m_refreshTimer->stop();
+    m_navigationTimer->stop();
     if (m_metadataStatusTimer) {
         m_metadataStatusTimer->stop();
     }
@@ -165,6 +166,11 @@ void LogWidget::setupUi() {
         }
     });
     m_metadataStatusTimer->start();
+
+    m_navigationTimer = new QTimer(this);
+    m_navigationTimer->setSingleShot(true);
+    m_navigationTimer->setInterval(35);
+    connect(m_navigationTimer, &QTimer::timeout, this, &LogWidget::applyPendingNavigation);
 
     {
         auto* viewContainer = new QWidget(this);
@@ -359,8 +365,15 @@ void LogWidget::setupUi() {
         m_logScrollBar->setPageStep(1);
         m_logScrollBar->setToolTip("Navigate rows (position = first row in buffer)");
         connect(m_logScrollBar, &QScrollBar::valueChanged, this, [this](int value) {
-            setPointer(value, false, value < m_bufferPointer);
+            const int current = m_pendingPointer >= 0 ? m_pendingPointer : m_bufferPointer;
+            const bool backwards = value < current;
+            if (m_logScrollBar->isSliderDown()) {
+                queuePointer(value, backwards);
+                return;
+            }
+            setPointer(value, false, backwards);
         });
+        connect(m_logScrollBar, &QScrollBar::sliderReleased, this, &LogWidget::applyPendingNavigation);
 
         auto* contentBox = new QHBoxLayout();
         contentBox->setSpacing(2);
@@ -608,6 +621,37 @@ void LogWidget::setPointer(int p, bool force, bool backwards) {
 
     applyBufferToView();
     updateStatusLabel();
+}
+
+void LogWidget::queuePointer(int p, bool backwards) {
+    m_pendingPointer = p;
+    m_pendingPointerBackwards = backwards;
+    m_pendingFilteredSteps = 0;
+    m_navigationTimer->start();
+}
+
+void LogWidget::queueFilteredMove(int steps) {
+    if (steps == 0) {
+        return;
+    }
+
+    m_pendingFilteredSteps += steps;
+    m_navigationTimer->start();
+}
+
+void LogWidget::applyPendingNavigation() {
+    const int pointer = m_pendingPointer;
+    const bool backwards = m_pendingPointerBackwards;
+    const int filteredSteps = m_pendingFilteredSteps;
+    m_pendingPointer = -1;
+    m_pendingFilteredSteps = 0;
+
+    if (pointer >= 0) {
+        setPointer(pointer, false, backwards);
+    }
+    if (filteredSteps != 0) {
+        moveFiltered(filteredSteps);
+    }
 }
 
 int LogWidget::filteredLineAt(int lineNumber, bool backwards) const {
@@ -1346,10 +1390,20 @@ bool LogWidget::eventFilter(QObject* obj, QEvent* event) {
 
     if (event->type() == QEvent::Wheel) {
         auto* we = static_cast<QWheelEvent*>(event);
-        int angle = we->angleDelta().y();
-        int steps = -(angle / 15);
+        int steps = 0;
+        if (!we->pixelDelta().isNull()) {
+            m_wheelPixelRemainder -= we->pixelDelta().y();
+            const int pixelsPerRow = qMax(1, QFontMetrics(m_textBrowser->font()).lineSpacing());
+            steps = m_wheelPixelRemainder / pixelsPerRow;
+            m_wheelPixelRemainder -= steps * pixelsPerRow;
+        } else {
+            m_wheelAngleRemainder -= we->angleDelta().y();
+            const int notches = m_wheelAngleRemainder / 120;
+            steps = notches * 3;
+            m_wheelAngleRemainder -= notches * 120;
+        }
         if (steps != 0) {
-            moveFiltered(steps);
+            queueFilteredMove(steps);
         }
         return true;
     }

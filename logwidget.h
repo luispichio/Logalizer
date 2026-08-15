@@ -99,6 +99,9 @@ private:
     int filteredLineAt(int lineNumber, bool backwards) const;
 
     void setPointer(int p, bool force = false, bool backwards = false);
+    void queuePointer(int p, bool backwards);
+    void queueFilteredMove(int steps);
+    void applyPendingNavigation();
     void fillBuffer();
     void applyBufferToView();
     void loadSettings();
@@ -117,6 +120,7 @@ private:
 
     QTimer* m_refreshTimer = nullptr;
     QTimer* m_metadataStatusTimer = nullptr;
+    QTimer* m_navigationTimer = nullptr;
 
     QVBoxLayout* m_mainLayout = nullptr;
 
@@ -159,6 +163,11 @@ private:
     QProgressBar* m_progressBar = nullptr;
 
     int m_bufferPointer = 0;
+    int m_pendingPointer = -1;
+    bool m_pendingPointerBackwards = false;
+    int m_pendingFilteredSteps = 0;
+    int m_wheelAngleRemainder = 0;
+    int m_wheelPixelRemainder = 0;
     QVector<QVector<QString>> m_buffer;
     QStringList m_bufferHeaders;
 
