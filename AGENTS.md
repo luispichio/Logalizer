@@ -92,7 +92,7 @@ MainWindow
 - Búsqueda full-text FTS5 global sobre toda la fuente, con combo editable e historial persistente.
 - Navegación por puntero: el visor carga solo las filas necesarias para llenar el viewport.
 - Búsqueda local dentro del conjunto filtrado con `Ctrl+F`, `F3`, `Shift+F3`, combo editable e historial persistente.
-- JSON Helper para líneas visibles: `Compact`, `Only values` y filtro de campos por ruta (`level,msg,user.id,-metadata.*`).
+- Field Viewer para líneas visibles: `Compact`, `Only values` y filtro de campos por ruta (`level,msg,user.id,-metadata.*`). Soporta JSON, capturas nombradas del formato detectado y pares `key=value`.
 - Barra inferior con tamaño, líneas, estados de búsqueda/filtro y progreso.
 - Menú `File > Recent Files` con últimos archivos abiertos y acción para limpiar la lista.
 
@@ -100,7 +100,7 @@ MainWindow
 
 - Implementada con `QSettings`.
 - En Linux, Qt guarda normalmente en `~/.config/Logalizer/Logalizer.conf`.
-- Se persisten preferencias de vista, opciones de JSON Helper, historiales de filtros y últimos archivos.
+- Se persisten preferencias de vista, opciones del Field Viewer, historiales de filtros y últimos archivos.
 - No se persisten tablas SQLite, buffers de texto ni contenido de logs.
 
 ## ✅ Instrucciones para la IA
