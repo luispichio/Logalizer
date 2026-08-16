@@ -159,8 +159,12 @@ void LogWidget::setupUi() {
     m_metadataStatusTimer->setInterval(1000);
     connect(m_metadataStatusTimer, &QTimer::timeout, this, [this]() {
         updateMetadataStatusLabel();
-        if (sortByTimestamp()) {
+        if (sortByTimestamp() || m_metadataReprocessing) {
             refreshData();
+        }
+        const MetadataProgress progress = MetadataPipeline::instance().progress(m_fileId);
+        if (m_metadataReprocessing && progress.queuedLines > 0 && progress.processedLines >= progress.queuedLines) {
+            m_metadataReprocessing = false;
         }
     });
     m_metadataStatusTimer->start();
@@ -236,6 +240,12 @@ void LogWidget::setupUi() {
         m_jsonFieldFilterCombo->setToolTip("Include fields by name/path, exclude with '-', wildcard prefixes with .*.");
         jsonBar->addWidget(m_jsonFieldFilterCombo, 1);
 
+        jsonBar->addWidget(new QLabel("Format:", viewContainer));
+        m_formatCombo = new QComboBox(viewContainer);
+        m_formatCombo->setMinimumWidth(180);
+        populateFormatSelector();
+        jsonBar->addWidget(m_formatCombo);
+
         viewLayout->addLayout(jsonBar);
 
         connect(m_jsonHelperCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); saveSettings(); });
@@ -247,6 +257,7 @@ void LogWidget::setupUi() {
         connect(m_jsonFieldFilterCombo, QOverload<int>::of(&QComboBox::activated), this, [this](int) { applyBufferToView(); });
         connect(m_jsonCompactCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); saveSettings(); });
         connect(m_jsonOnlyValuesCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); saveSettings(); });
+        connect(m_formatCombo, QOverload<int>::of(&QComboBox::activated), this, &LogWidget::onFormatSelectionChanged);
 
         m_textFindBar = new QWidget(this);
         m_textFindBar->setVisible(true);
@@ -451,27 +462,69 @@ void LogWidget::onFormatDetected(int fileId, LogFormatDetectionResult result) {
         return;
     }
 
-    m_formatDetection = result;
-    MetadataPipeline::instance().setDetectedFormat(fileId, result);
+    m_autoDetectedFormat = result;
+    if (m_formatCombo && m_formatCombo->currentData().toString() == "auto") {
+        m_formatDetection = result;
+        MetadataPipeline::instance().setDetectedFormat(fileId, result);
+        updateFormatStatus();
+        if (m_jsonHelperCheck && m_jsonHelperCheck->isChecked() && !m_buffer.isEmpty()) {
+            applyBufferToView();
+        }
+    }
+}
+
+void LogWidget::populateFormatSelector() {
+    if (!m_formatCombo) {
+        return;
+    }
+    m_availableFormats = LogFormatRegistry::loadFormats();
+    m_formatCombo->addItem("Auto-detect", "auto");
+    m_formatCombo->addItem("Plain text", "plain");
+    for (const LogFormatDefinition& format : m_availableFormats) {
+        m_formatCombo->addItem(format.displayName(), format.id);
+    }
+}
+
+void LogWidget::updateFormatStatus() {
     if (!m_formatStatus) {
         return;
     }
-    if (!result.detected) {
+    if (!m_formatDetection.detected) {
         m_formatStatus->setText("Format: plain text");
-        m_formatStatus->setToolTip("No known format matched the sampled lines");
+        m_formatStatus->setToolTip("No structured format is active");
         return;
     }
+    m_formatStatus->setText(QString("Format: %1").arg(m_formatDetection.format.displayName()));
+    m_formatStatus->setToolTip(QString("%1\nSource: %2")
+        .arg(m_formatDetection.format.description.isEmpty() ? m_formatDetection.format.displayName() : m_formatDetection.format.description)
+        .arg(m_formatDetection.format.source));
+}
 
-    m_formatStatus->setText(QString("Format: %1").arg(result.format.displayName()));
-    m_formatStatus->setToolTip(QString("%1\nMatched %2/%3 sampled lines\nSource: %4")
-        .arg(result.format.description.isEmpty() ? result.format.displayName() : result.format.description)
-        .arg(result.matchedLines)
-        .arg(result.sampledLines)
-        .arg(result.format.source));
-
-    if (m_jsonHelperCheck && m_jsonHelperCheck->isChecked() && !m_buffer.isEmpty()) {
-        applyBufferToView();
+void LogWidget::onFormatSelectionChanged(int index) {
+    if (!m_formatCombo || index < 0) {
+        return;
     }
+    const QString id = m_formatCombo->itemData(index).toString();
+    if (id == "auto") {
+        m_formatDetection = m_autoDetectedFormat;
+    } else if (id == "plain") {
+        m_formatDetection = LogFormatDetectionResult{};
+    } else {
+        m_formatDetection = LogFormatDetectionResult{};
+        for (const LogFormatDefinition& format : m_availableFormats) {
+            if (format.id == id) {
+                m_formatDetection.detected = true;
+                m_formatDetection.format = format;
+                m_formatDetection.patternName.clear();
+                break;
+            }
+        }
+    }
+    MetadataPipeline::instance().setDetectedFormat(m_fileId, m_formatDetection);
+    MetadataPipeline::instance().reprocessFile(m_fileId);
+    m_metadataReprocessing = true;
+    updateFormatStatus();
+    refreshData();
 }
 
 void LogWidget::onChunkInserted(int fileId, qint32 totalLinesInserted) {

@@ -49,6 +49,7 @@ private slots:
     void onChunkInserted(int fileId, qint32 totalLinesInserted);
     void onFinished(int fileId);
     void onError(int fileId, QString message);
+    void onFormatSelectionChanged(int index);
 
     void onApplyFilters();
     void onWrapToggled(bool checked);
@@ -69,6 +70,8 @@ private:
     void refreshData();
     void updateStatusLabel();
     void updateMetadataStatusLabel();
+    void populateFormatSelector();
+    void updateFormatStatus();
     QString buildRowHtml(const QVector<QString>& row, const QMap<QString, int>& fieldWidths) const;
     QString timestampDisplayText(const QVector<QString>& row) const;
     bool includeMetadataInRows() const;
@@ -145,6 +148,7 @@ private:
     QCheckBox* m_showLogLevelCheck = nullptr;
     QCheckBox* m_sortTimestampCheck = nullptr;
     QCheckBox* m_jsonHelperCheck = nullptr;
+    QComboBox* m_formatCombo = nullptr;
     QComboBox* m_jsonFieldFilterCombo = nullptr;
     QCheckBox* m_jsonCompactCheck = nullptr;
     QCheckBox* m_jsonOnlyValuesCheck = nullptr;
@@ -171,6 +175,9 @@ private:
     qint64 m_fileSize = 0;
     qint32 m_totalLines = 0;
     LogFormatDetectionResult m_formatDetection;
+    LogFormatDetectionResult m_autoDetectedFormat;
+    QVector<LogFormatDefinition> m_availableFormats;
+    bool m_metadataReprocessing = false;
     QString m_timestampDisplayMode = "iso-utc";
     QString m_timestampCustomFormat = "yyyy-MM-dd HH:mm:ss.zzz";
 };

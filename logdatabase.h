@@ -20,6 +20,7 @@ public:
     bool dropTable(int fileId);
     bool insertBatch(int fileId, const QVector<LineRecord>& records);
     bool insertMetadataBatch(int fileId, const QVector<LineMetadataRecord>& records);
+    bool clearMetadata(int fileId);
 
     bool queryRows(int fileId, int firstLineNumber, int limit,
                    const QString& ftsFilter,

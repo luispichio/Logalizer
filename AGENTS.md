@@ -93,6 +93,7 @@ MainWindow
 - Navegación por puntero: el visor carga solo las filas necesarias para llenar el viewport.
 - Búsqueda local dentro del conjunto filtrado con `Ctrl+F`, `F3`, `Shift+F3`, combo editable e historial persistente.
 - Field Viewer para líneas visibles: `Compact`, `Only values` y filtro de campos por ruta (`level,msg,user.id,-metadata.*`). Soporta JSON, capturas nombradas del formato detectado y pares `key=value`.
+- Selector `Format` por pestaña: permite usar auto-detección, texto plano o un formato explícito; los cambios reprocesan metadata sin reconstruir FTS.
 - Barra inferior con tamaño, líneas, estados de búsqueda/filtro y progreso.
 - Menú `File > Recent Files` con últimos archivos abiertos y acción para limpiar la lista.
 

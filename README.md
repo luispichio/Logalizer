@@ -24,6 +24,7 @@ Logalizer es una aplicación de escritorio para analizar logs con foco en abrir 
 - `Filter`: aplica una expresión FTS5 global sobre todo el contenido indexado.
 - `Find`: busca palabras dentro del conjunto filtrado y navega entre coincidencias.
 - `Fields`: activa ayuda visual para campos estructurados, con `Compact`, `Only values` y filtro de campos.
+- `Format`: permite usar la detección automática, texto plano o fijar un formato cargado para la pestaña. Al cambiarlo, Logalizer reprocesa la metadata en segundo plano.
 - Menú contextual del visor: con texto seleccionado permite agregar o excluir la selección del filtro FTS5, agregar reglas de campos cuando `Fields` está activo, copiar la selección o copiar la línea completa.
 
 ## Configuración Persistente

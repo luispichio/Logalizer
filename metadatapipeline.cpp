@@ -2,6 +2,7 @@
 
 #include "logdatabase.h"
 #include "loglineparser.h"
+#include "loglinestore.h"
 
 #include <QCoreApplication>
 #include <QMetaObject>
@@ -36,6 +37,42 @@ public:
 private:
     int m_fileId;
     QVector<MetadataInputLine> m_lines;
+    MetadataDetectionConfig m_config;
+};
+
+class ReprocessMetadataTask : public QRunnable
+{
+public:
+    ReprocessMetadataTask(int fileId, QSharedPointer<LogLineStore> store, const MetadataDetectionConfig& config)
+        : m_fileId(fileId), m_store(std::move(store)), m_config(config) {}
+
+    void run() override {
+        if (!m_store || !LogDatabase::instance().clearMetadata(m_fileId)) {
+            return;
+        }
+
+        constexpr int BatchSize = 2000;
+        QVector<LineMetadataRecord> parsed;
+        parsed.reserve(BatchSize);
+        const int lineCount = m_store->lineCount();
+        int batchStart = 0;
+        for (int lineNumber = 0; lineNumber < lineCount; ++lineNumber) {
+            const ParsedLineMetadata metadata = parseLineMetadata(QStringView(m_store->lineText(lineNumber)), m_config);
+            if (metadata.level != LogLevel::Unknown || !metadata.timestampText.isEmpty()) {
+                parsed.append(LineMetadataRecord(lineNumber, metadata.timestampText, metadata.timestampEpochMs, metadata.level));
+            }
+            if ((lineNumber + 1) % BatchSize == 0 || lineNumber + 1 == lineCount) {
+                LogDatabase::instance().insertMetadataBatch(m_fileId, parsed);
+                MetadataPipeline::instance().enqueueParsedBatch(m_fileId, lineNumber + 1 - batchStart, {});
+                parsed.clear();
+                batchStart = lineNumber + 1;
+            }
+        }
+    }
+
+private:
+    int m_fileId;
+    QSharedPointer<LogLineStore> m_store;
     MetadataDetectionConfig m_config;
 };
 }
@@ -154,6 +191,30 @@ LogFormatDetectionResult MetadataPipeline::detectedFormat(int fileId) const {
 void MetadataPipeline::setReferenceDate(int fileId, const QDate& date) {
     QMutexLocker locker(&m_mutex);
     m_referenceDateByFile.insert(fileId, date.isValid() ? date : QDate::currentDate());
+}
+
+void MetadataPipeline::reprocessFile(int fileId) {
+    const auto store = LogLineStoreRegistry::instance().store(fileId);
+    if (!store) {
+        return;
+    }
+
+    MetadataDetectionConfig config;
+    {
+        QMutexLocker locker(&m_mutex);
+        config = m_detectionConfig;
+        const LogFormatDetectionResult formatResult = m_formatByFile.value(fileId);
+        if (formatResult.detected) {
+            config.hasFormat = true;
+            config.format = formatResult.format;
+            config.formatPatternName = formatResult.patternName;
+        }
+        config.referenceDate = m_referenceDateByFile.value(fileId, QDate::currentDate());
+        MetadataProgress& progress = m_progressByFile[fileId];
+        progress = MetadataProgress{};
+        progress.queuedLines = store->lineCount();
+    }
+    m_parserPool.start(new ReprocessMetadataTask(fileId, store, config));
 }
 
 void MetadataPipeline::shutdown() {
