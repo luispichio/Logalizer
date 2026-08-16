@@ -187,7 +187,7 @@ bool LogDatabase::insertMetadataBatch(int fileId, const QVector<LineMetadataReco
         return true;
     }
 
-    QString sql = QString("INSERT OR IGNORE INTO %1 (rowid, timestamp_text, timestamp_epoch_ms, level) VALUES (?, ?, ?, ?)")
+    QString sql = QString("INSERT OR REPLACE INTO %1 (rowid, timestamp_text, timestamp_epoch_ms, level) VALUES (?, ?, ?, ?)")
         .arg(metadataTableName(fileId));
 
     if (!m_db.transaction()) {
@@ -215,6 +215,20 @@ bool LogDatabase::insertMetadataBatch(int fileId, const QVector<LineMetadataReco
         return false;
     }
 
+    return true;
+}
+
+bool LogDatabase::clearMetadata(int fileId) {
+    QMutexLocker locker(&m_mutex);
+    if (!m_activeFileIds.contains(fileId)) {
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    if (!query.exec(QString("DELETE FROM %1").arg(metadataTableName(fileId)))) {
+        qWarning() << "LogDatabase::clearMetadata: failed:" << query.lastError().text();
+        return false;
+    }
     return true;
 }
 

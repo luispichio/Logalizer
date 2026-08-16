@@ -39,6 +39,7 @@ public:
     void setDetectedFormat(int fileId, const LogFormatDetectionResult& result);
     LogFormatDetectionResult detectedFormat(int fileId) const;
     void setReferenceDate(int fileId, const QDate& date);
+    void reprocessFile(int fileId);
 
 private:
     MetadataPipeline();

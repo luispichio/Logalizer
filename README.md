@@ -10,8 +10,8 @@ Logalizer es una aplicación de escritorio para analizar logs con foco en abrir 
 - **Offset de archivo disponible**: cada línea conserva `file_position` como dato no indexado para usos posteriores.
 - **Multihilo y UI fluida**: la ingesta ocurre en un `QThread` con inserts por lotes y refresco con debounce para no bloquear la interfaz.
 - **Vista de texto enfocada**: el contenido se muestra en `QTextBrowser`, con wrap configurable, números de línea opcionales, búsqueda FTS5 global, búsqueda local dentro del buffer visible (`Ctrl+F`, `F3`, `Shift+F3`) y menú contextual para promover selecciones a filtros.
-- **JSON Helper**: permite formatear líneas JSON visibles, filtrar campos por ruta, mostrar formato compacto `key=value` o solo valores.
-- **Historial persistente**: los filtros FTS5, filtros de campos JSON y búsquedas locales se guardan como combos editables.
+- **Field Viewer**: formatea campos de JSON, formatos regex detectados y líneas `key=value`; permite filtrar por campo, mostrar formato compacto o solo valores.
+- **Historial persistente**: los filtros FTS5, filtros de campos y búsquedas locales se guardan como combos editables.
 - **Últimos archivos**: el menú `File > Recent Files` conserva los últimos archivos abiertos sin reabrirlos automáticamente.
 - **Aislamiento por pestaña**: cada fuente vive en su propia tabla in-memory y al cerrar la pestaña se libera inmediatamente.
 
@@ -23,8 +23,9 @@ Logalizer es una aplicación de escritorio para analizar logs con foco en abrir 
 - `logalizer -` o `logalizer --stdin`: lee logs desde entrada estándar.
 - `Filter`: aplica una expresión FTS5 global sobre todo el contenido indexado.
 - `Find`: busca palabras dentro del conjunto filtrado y navega entre coincidencias.
-- `JSON`: activa ayuda visual para líneas JSON, con `Compact`, `Only values` y filtro de campos.
-- Menú contextual del visor: con texto seleccionado permite agregar o excluir la selección del filtro FTS5, agregar reglas de campos JSON cuando `JSON` está activo, copiar la selección o copiar la línea completa.
+- `Fields`: activa ayuda visual para campos estructurados, con `Compact`, `Only values` y filtro de campos.
+- `Format`: permite usar la detección automática, texto plano o fijar un formato cargado para la pestaña. Al cambiarlo, Logalizer reprocesa la metadata en segundo plano.
+- Menú contextual del visor: con texto seleccionado permite agregar o excluir la selección del filtro FTS5, agregar reglas de campos cuando `Fields` está activo, copiar la selección o copiar la línea completa.
 
 ## Configuración Persistente
 
@@ -37,9 +38,9 @@ Logalizer usa `QSettings` para guardar preferencias de usuario. En Linux, Qt gua
 Actualmente se persiste:
 
 - Preferencias de visualización: wrap y números de línea.
-- Preferencias de JSON Helper: activación, formato compacto, only values y filtro de campos.
+- Preferencias del Field Viewer: activación, formato compacto, only values y filtro de campos.
 - Historial de filtros FTS5.
-- Historial de filtros de campos JSON.
+- Historial de filtros de campos.
 - Historial de búsqueda local.
 - Lista de últimos archivos abiertos.
 

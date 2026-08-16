@@ -81,9 +81,9 @@ void SettingsDialog::setupUi() {
         auto* layout = new QFormLayout(page);
         layout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
-        m_jsonEnabled = new QCheckBox("Enable JSON helper by default", page);
+        m_jsonEnabled = new QCheckBox("Enable field viewer by default", page);
         m_jsonCompact = new QCheckBox("Compact mode by default", page);
-        m_jsonOnlyValues = new QCheckBox("Only values by default", page);
+        m_jsonOnlyValues = new QCheckBox("Show only values by default", page);
         m_jsonFieldFilter = new QLineEdit(page);
         m_jsonFieldFilter->setPlaceholderText("level,msg,user.id,-metadata.*");
 
@@ -92,7 +92,7 @@ void SettingsDialog::setupUi() {
         layout->addRow(m_jsonOnlyValues);
         layout->addRow("Default field filter:", m_jsonFieldFilter);
 
-        tabs->addTab(page, "JSON Helper");
+        tabs->addTab(page, "Field Viewer");
     }
 
     {
