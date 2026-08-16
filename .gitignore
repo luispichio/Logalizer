@@ -83,3 +83,6 @@ CMakeLists.txt.user*
 /build*/
 /dist/
 /tools/linuxdeployqt.AppImage
+
+# Temporary files
+/formats
