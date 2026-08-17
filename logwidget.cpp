@@ -131,6 +131,10 @@ LogWidget::~LogWidget() {
     if (m_streamWorker) {
         m_streamWorker->stop();
     }
+    // Cancel queued parsing before waiting for the producer thread. This releases
+    // parser capacity promptly and prevents a closing tab from waiting behind its
+    // own metadata backlog.
+    MetadataPipeline::instance().cancelFile(m_fileId);
     if (m_workerThread) {
         m_workerThread->quit();
         if (!m_workerThread->wait(8000)) {
@@ -139,7 +143,7 @@ LogWidget::~LogWidget() {
             m_workerThread->wait(1000);
         }
     }
-    MetadataPipeline::instance().cancelFile(m_fileId);
+    MetadataPipeline::instance().forgetFile(m_fileId);
     LogDatabase::instance().dropTable(m_fileId);
     LogLineStoreRegistry::instance().unregisterStore(m_fileId);
     qInfo() << "LogWidget: Cleaned up fileId" << m_fileId << m_filePath;

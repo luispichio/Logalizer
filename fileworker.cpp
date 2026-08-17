@@ -92,7 +92,9 @@ void FileWorker::doWork() {
             sampleLines.append(line);
         }
     }
-    emit formatDetected(m_fileId, FormatDetector::detect(m_fileName, sampleLines));
+    const LogFormatDetectionResult detectedFormat = FormatDetector::detect(m_fileName, sampleLines);
+    MetadataPipeline::instance().setDetectedFormat(m_fileId, detectedFormat);
+    emit formatDetected(m_fileId, detectedFormat);
 
     qint64 bytesProcessed = 0;
 
@@ -112,8 +114,8 @@ void FileWorker::doWork() {
         batch.append(LineRecord(line, posBefore, lineNumber));
 
         if (batch.size() >= m_batchSize) {
-            LogDatabase::instance().insertBatch(m_fileId, batch);
             MetadataPipeline::instance().enqueueBatch(m_fileId, batch);
+            LogDatabase::instance().insertBatch(m_fileId, batch);
             batch.clear();
 
             emit chunkInserted(m_fileId, lineNumber + 1);
@@ -122,8 +124,8 @@ void FileWorker::doWork() {
     }
 
     if (!m_stopRequested && !batch.isEmpty()) {
-        LogDatabase::instance().insertBatch(m_fileId, batch);
         MetadataPipeline::instance().enqueueBatch(m_fileId, batch);
+        LogDatabase::instance().insertBatch(m_fileId, batch);
         emit chunkInserted(m_fileId, totalLines);
     }
 

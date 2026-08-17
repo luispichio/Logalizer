@@ -94,7 +94,9 @@ void StreamWorker::doWork() {
     }
 
     if (!m_formatDetectionEmitted) {
-        emit formatDetected(m_fileId, FormatDetector::detect("stdin", m_sampleLines));
+        const LogFormatDetectionResult detectedFormat = FormatDetector::detect("stdin", m_sampleLines);
+        MetadataPipeline::instance().setDetectedFormat(m_fileId, detectedFormat);
+        emit formatDetected(m_fileId, detectedFormat);
         m_formatDetectionEmitted = true;
     }
 
@@ -122,11 +124,13 @@ void StreamWorker::flushBatch(QVector<LineRecord>& batch, qint32 lineNumber, qin
         return;
     }
     if (!m_formatDetectionEmitted) {
-        emit formatDetected(m_fileId, FormatDetector::detect("stdin", m_sampleLines));
+        const LogFormatDetectionResult detectedFormat = FormatDetector::detect("stdin", m_sampleLines);
+        MetadataPipeline::instance().setDetectedFormat(m_fileId, detectedFormat);
+        emit formatDetected(m_fileId, detectedFormat);
         m_formatDetectionEmitted = true;
     }
-    LogDatabase::instance().insertBatch(m_fileId, batch);
     MetadataPipeline::instance().enqueueBatch(m_fileId, batch);
+    LogDatabase::instance().insertBatch(m_fileId, batch);
     batch.clear();
 
     emit chunkInserted(m_fileId, lineNumber);
