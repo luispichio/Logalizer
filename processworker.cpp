@@ -146,12 +146,14 @@ void ProcessWorker::flushBatch() {
         return;
     }
 
-    LogDatabase::instance().insertBatch(m_fileId, m_batch);
     if (!m_formatDetectionEmitted) {
-        emit formatDetected(m_fileId, FormatDetector::detect(m_command, m_sampleLines));
+        const LogFormatDetectionResult detectedFormat = FormatDetector::detect(m_command, m_sampleLines);
+        MetadataPipeline::instance().setDetectedFormat(m_fileId, detectedFormat);
+        emit formatDetected(m_fileId, detectedFormat);
         m_formatDetectionEmitted = true;
     }
     MetadataPipeline::instance().enqueueBatch(m_fileId, m_batch);
+    LogDatabase::instance().insertBatch(m_fileId, m_batch);
     m_batch.clear();
 
     emit chunkInserted(m_fileId, m_lineNumber);
