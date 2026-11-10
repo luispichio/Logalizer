@@ -14,6 +14,8 @@ Este archivo `Logalizer.md` es la fuente de verdad del proyecto.
 ### 2.1 Procesamiento de Archivos
 
 - Ingesta multihilo: `FileWorker` corre en un `QThread` dedicado.
+- Seguimiento de archivos por crecimiento; si se detecta truncado o reemplazo, se recarga la fuente sin conservar el contenido anterior.
+- Las fuentes en vivo muestran progresivamente las líneas completas y el visor sigue el final solo mientras el usuario permanezca allí.
 - Múltiples archivos abiertos concurrentemente, un tab por archivo.
 - Cada línea persiste siempre:
   - `raw`
@@ -51,7 +53,7 @@ Por cada archivo abierto se crea una tabla FTS5 in-memory:
 ### 2.4 Rendimiento
 
 - Inserts por lotes de 5.000 líneas dentro de transacciones SQLite.
-- `onChunkInserted` usa debounce de 1.5 s para evitar refrescos agresivos.
+- `onChunkInserted` limita los refrescos con un temporizador de 1.5 s sin posponerlos indefinidamente ante datos continuos.
 - El hilo de UI nunca espera lecturas de archivo ni parseo de disco.
 
 ## 3. Stack Tecnológico

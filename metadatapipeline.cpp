@@ -216,7 +216,7 @@ void MetadataPipeline::reprocessFile(int fileId) {
         config.referenceDate = m_referenceDateByFile.value(fileId, QDate::currentDate());
         const FileState previous = ensureFileStateLocked(fileId);
         previous.cancelled->storeRelease(1);
-        state.generation = previous.generation + 1;
+        state.generation = ++m_nextGeneration;
         state.cancelled = QSharedPointer<QAtomicInt>::create(0);
         m_fileStates[fileId] = state;
         MetadataProgress& progress = m_progressByFile[fileId];
@@ -280,7 +280,7 @@ MetadataPipeline::FileState MetadataPipeline::ensureFileStateLocked(int fileId) 
     }
 
     FileState state;
-    state.generation = 1;
+    state.generation = ++m_nextGeneration;
     state.cancelled = QSharedPointer<QAtomicInt>::create(0);
     m_fileStates.insert(fileId, state);
     return state;

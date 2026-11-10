@@ -47,6 +47,7 @@ private slots:
     void onProgressUpdate(int fileId, qint64 bytesProcessed, qint64 totalBytes, qint32 linesProcessed);
     void onFormatDetected(int fileId, LogFormatDetectionResult result);
     void onChunkInserted(int fileId, qint32 totalLinesInserted);
+    void onReloading(int fileId);
     void onFinished(int fileId);
     void onError(int fileId, QString message);
     void onFormatSelectionChanged(int index);
@@ -68,6 +69,8 @@ protected:
 private:
     void setupUi();
     void refreshData();
+    void updateFollowFromView();
+    void followEnd();
     void updateStatusLabel();
     void updateMetadataStatusLabel();
     void populateFormatSelector();
@@ -178,6 +181,9 @@ private:
     LogFormatDetectionResult m_autoDetectedFormat;
     QVector<LogFormatDefinition> m_availableFormats;
     bool m_metadataReprocessing = false;
+    bool m_followEnd = true;
+    bool m_initialFileLoading = false;
+    bool m_initialRefreshDone = false;
     QString m_timestampDisplayMode = "iso-utc";
     QString m_timestampCustomFormat = "yyyy-MM-dd HH:mm:ss.zzz";
 };

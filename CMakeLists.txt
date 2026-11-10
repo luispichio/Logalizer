@@ -90,6 +90,20 @@ target_link_libraries(Logalizer PRIVATE Qt${QT_VERSION_MAJOR}::Sql)
 # Make #include "version.h" resolve to the generated file
 target_include_directories(Logalizer PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
+include(CTest)
+if(BUILD_TESTING AND QT_VERSION_MAJOR EQUAL 6)
+    find_package(Qt6 QUIET COMPONENTS Test)
+    if(TARGET Qt6::Test)
+    get_target_property(LOGALIZER_TEST_SOURCES Logalizer SOURCES)
+    list(REMOVE_ITEM LOGALIZER_TEST_SOURCES main.cpp mainwindow.cpp mainwindow.h)
+    qt_add_executable(logalizer_live_tests tests/live_tests.cpp ${LOGALIZER_TEST_SOURCES})
+    target_include_directories(logalizer_live_tests PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
+    target_link_libraries(logalizer_live_tests PRIVATE Qt6::Widgets Qt6::Sql Qt6::Test)
+    add_test(NAME live_ingestion COMMAND logalizer_live_tests $<TARGET_FILE:Logalizer>)
+    set_tests_properties(live_ingestion PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
+endif()
+
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
 if(${QT_VERSION} VERSION_LESS 6.1.0)
   set(BUNDLE_ID_OPTION MACOSX_BUNDLE_GUI_IDENTIFIER com.luispichio.logalizer)
