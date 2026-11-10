@@ -86,6 +86,7 @@ private:
     MetadataDetectionConfig m_detectionConfig;
     QSharedPointer<QSemaphore> m_taskSlots = QSharedPointer<QSemaphore>::create(256);
     bool m_stopping = false;
+    quint64 m_nextGeneration = 0;
 };
 
 #endif // METADATAPIPELINE_H

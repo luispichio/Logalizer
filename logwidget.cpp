@@ -66,6 +66,8 @@ LogWidget::LogWidget(SourceType sourceType, const QString& displayName, int file
     , m_sourceType(sourceType)
 {
     setupUi();
+    m_initialFileLoading = m_sourceType == SourceType::File;
+    m_followEnd = !m_initialFileLoading;
 
     if (m_sourceType == SourceType::File) {
         QFileInfo fi(displayName);
@@ -85,6 +87,7 @@ LogWidget::LogWidget(SourceType sourceType, const QString& displayName, int file
         connect(m_worker, &FileWorker::progressUpdate, this, &LogWidget::onProgressUpdate);
         connect(m_worker, &FileWorker::formatDetected, this, &LogWidget::onFormatDetected);
         connect(m_worker, &FileWorker::chunkInserted, this, &LogWidget::onChunkInserted);
+        connect(m_worker, &FileWorker::reloading, this, &LogWidget::onReloading);
         connect(m_worker, &FileWorker::finished, this, &LogWidget::onFinished);
         connect(m_worker, &FileWorker::error, this, &LogWidget::onError);
         connect(m_workerThread, &QThread::finished, m_worker, &QObject::deleteLater);
@@ -339,7 +342,7 @@ void LogWidget::setupUi() {
         connect(m_showLineNumberCheck, &QCheckBox::toggled, this, [this](bool) { applyBufferToView(); saveSettings(); });
         connect(m_showTimestampCheck, &QCheckBox::toggled, this, [this](bool) { fillBuffer(); applyBufferToView(); saveSettings(); });
         connect(m_showLogLevelCheck, &QCheckBox::toggled, this, [this](bool) { fillBuffer(); applyBufferToView(); saveSettings(); });
-        connect(m_sortTimestampCheck, &QCheckBox::toggled, this, [this](bool) { setPointer(0, true); updateMetadataStatusLabel(); saveSettings(); });
+        connect(m_sortTimestampCheck, &QCheckBox::toggled, this, [this](bool) { setPointer(0, true); updateFollowFromView(); updateMetadataStatusLabel(); saveSettings(); });
 
         connect(m_textFindCombo->lineEdit(), &QLineEdit::returnPressed, this, &LogWidget::onTextFindSearch);
         connect(m_textFindCombo->lineEdit(), &QLineEdit::textChanged, this, [this]() {
@@ -385,6 +388,7 @@ void LogWidget::setupUi() {
                 return;
             }
             setPointer(value, false, backwards);
+            updateFollowFromView();
         });
         connect(m_logScrollBar, &QScrollBar::sliderReleased, this, &LogWidget::applyPendingNavigation);
 
@@ -456,6 +460,10 @@ void LogWidget::onProgressUpdate(int fileId, qint64 bytesProcessed, qint64 total
         }
         int percent = static_cast<int>(bytesProcessed * 100 / totalBytes);
         m_progressBar->setValue(percent);
+    }
+    if (m_sourceType == SourceType::File) {
+        m_fileSize = totalBytes;
+        m_labelSize->setText(QString::number(m_fileSize / 1024.0 / 1024.0, 'f', 2) + " MB");
     }
     m_labelLines->setText(QString::number(linesProcessed));
     m_totalLines = linesProcessed;
@@ -539,12 +547,31 @@ void LogWidget::onChunkInserted(int fileId, qint32 totalLinesInserted) {
     m_totalLines = totalLinesInserted;
     m_labelLines->setText(QString::number(totalLinesInserted));
 
-    if (m_buffer.isEmpty()) {
+    if (!m_initialRefreshDone) {
+        m_initialRefreshDone = true;
         refreshData();
         return;
     }
 
-    m_refreshTimer->start();
+    if (!m_refreshTimer->isActive()) m_refreshTimer->start();
+}
+
+void LogWidget::onReloading(int fileId) {
+    if (fileId != m_fileId) return;
+    m_refreshTimer->stop();
+    m_navigationTimer->stop();
+    m_pendingPointer = -1;
+    m_pendingFilteredSteps = 0;
+    m_initialFileLoading = true;
+    m_initialRefreshDone = false;
+    m_followEnd = false;
+    m_totalLines = 0;
+    m_bufferPointer = 0;
+    m_buffer.clear();
+    m_labelLines->setText("0");
+    m_labelState->setText("File changed; reloading...");
+    m_textBrowser->clear();
+    updateScrollBar();
 }
 
 void LogWidget::onFinished(int fileId) {
@@ -558,9 +585,11 @@ void LogWidget::onFinished(int fileId) {
     }
     m_progressBar->setValue(100);
 
-    fillBuffer();
-    updateScrollBar();
-    applyBufferToView();
+    refreshData();
+    if (m_initialFileLoading) {
+        m_initialFileLoading = false;
+        updateFollowFromView();
+    }
 
     updateStatusLabel();
     emit loadingFinished(fileId);
@@ -585,6 +614,7 @@ void LogWidget::onApplyFilters() {
         }
         saveSettings();
         setPointer(0, true);
+        updateFollowFromView();
         return;
     }
 
@@ -596,6 +626,7 @@ void LogWidget::onApplyFilters() {
             m_searchStatus->setText("No matches");
         }
         setPointer(0, true);
+        updateFollowFromView();
         return;
     }
 
@@ -603,6 +634,7 @@ void LogWidget::onApplyFilters() {
         m_searchStatus->setText(QString("Filter active from line %1").arg(line + 1));
     }
     setPointer(line, true);
+    updateFollowFromView();
     saveSettings();
 }
 
@@ -613,7 +645,42 @@ void LogWidget::onWrapToggled(bool checked) {
 }
 
 void LogWidget::refreshData() {
-    setPointer(m_bufferPointer, true);
+    if (m_followEnd && !m_initialFileLoading) followEnd();
+    else setPointer(m_bufferPointer, true);
+}
+
+void LogWidget::followEnd() {
+    const int rows = currentRowSpace();
+    int first = qMax(0, rows - visibleRowCount());
+    if (!sortByTimestamp() && !m_ftsFilter.trimmed().isEmpty()) {
+        int line = LogDatabase::instance().findFilteredLine(m_fileId, m_ftsFilter, qMax(0, rows - 1), true);
+        if (line < 0) { setPointer(0, true); return; }
+        first = line;
+        for (int i = 1; i < visibleRowCount(); ++i) {
+            const int previous = LogDatabase::instance().findFilteredLine(m_fileId, m_ftsFilter, first - 1, true);
+            if (first <= 0 || previous < 0 || previous >= first) break;
+            first = previous;
+        }
+    }
+    setPointer(first, true);
+}
+
+void LogWidget::updateFollowFromView() {
+    if (m_initialFileLoading) return;
+    if (m_buffer.isEmpty()) {
+        m_followEnd = currentRowSpace() == 0 || !m_ftsFilter.trimmed().isEmpty();
+        return;
+    }
+    if (sortByTimestamp()) {
+        m_followEnd = m_bufferPointer + m_buffer.size() >= currentRowSpace();
+    } else {
+        const int index = m_bufferHeaders.indexOf("line_number");
+        if (index < 0) return;
+        const int last = m_buffer.last().value(index).toInt();
+        m_followEnd = m_ftsFilter.trimmed().isEmpty()
+            ? last + 1 >= m_totalLines
+            : LogDatabase::instance().findFilteredLine(m_fileId, m_ftsFilter, last + 1, false) < 0;
+    }
 }
 
 bool LogWidget::includeMetadataInRows() const {
@@ -711,6 +778,7 @@ void LogWidget::applyPendingNavigation() {
     if (filteredSteps != 0) {
         moveFiltered(filteredSteps);
     }
+    updateFollowFromView();
 }
 
 int LogWidget::filteredLineAt(int lineNumber, bool backwards) const {
@@ -1416,12 +1484,12 @@ bool LogWidget::eventFilter(QObject* obj, QEvent* event) {
         auto* ke = static_cast<QKeyEvent*>(event);
         int pageRows = visibleRowCount();
         switch (ke->key()) {
-        case Qt::Key_Down: moveFiltered(1); return true;
-        case Qt::Key_Up: moveFiltered(-1); return true;
-        case Qt::Key_PageDown: moveFiltered(pageRows); return true;
-        case Qt::Key_PageUp: moveFiltered(-pageRows); return true;
-        case Qt::Key_Home: setPointer(0, true, false); return true;
-        case Qt::Key_End: setPointer(qMax(0, static_cast<int>(m_totalLines) - 1), true, true); return true;
+        case Qt::Key_Down: moveFiltered(1); updateFollowFromView(); return true;
+        case Qt::Key_Up: moveFiltered(-1); updateFollowFromView(); return true;
+        case Qt::Key_PageDown: moveFiltered(pageRows); updateFollowFromView(); return true;
+        case Qt::Key_PageUp: moveFiltered(-pageRows); updateFollowFromView(); return true;
+        case Qt::Key_Home: setPointer(0, true, false); updateFollowFromView(); return true;
+        case Qt::Key_End: followEnd(); m_followEnd = true; return true;
         default: break;
         }
     }
@@ -1482,6 +1550,7 @@ void LogWidget::jumpToTextMatch(int fromLineNumber, bool backwards, const QStrin
     }
 
     setPointer(line, true);
+    updateFollowFromView();
     if (m_textFindStatus) {
         m_textFindStatus->setText(QString("Found line %1").arg(line + 1));
     }

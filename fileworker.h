@@ -25,6 +25,7 @@ signals:
     void progressUpdate(int fileId, qint64 bytesProcessed, qint64 totalBytes, qint32 linesProcessed);
     void formatDetected(int fileId, LogFormatDetectionResult result);
     void chunkInserted(int fileId, qint32 totalLinesInserted);
+    void reloading(int fileId);
     void finished(int fileId);
     void error(int fileId, QString message);
 

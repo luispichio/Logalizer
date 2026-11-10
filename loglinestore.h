@@ -31,6 +31,9 @@ public:
     ~MmapLineStore() override;
 
     bool open(QString* errorMessage = nullptr);
+    bool appendToSize(qint64 newSize, QString* errorMessage = nullptr);
+    bool hasPartialLine() const;
+    qint64 mappedSize() const;
 
     int lineCount() const override;
     qint64 filePosition(int lineNumber) const override;
@@ -43,6 +46,8 @@ private:
     qint64 m_mappedSize = 0;
     QVector<qint64> m_offsets;
     QVector<qint32> m_lengths;
+    bool m_partialLine = false;
+    mutable QReadWriteLock m_lock;
 };
 
 class SpillLineStore final : public LogLineStore

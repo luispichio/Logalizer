@@ -5,6 +5,8 @@ Logalizer es una aplicación de escritorio para analizar logs con foco en abrir 
 ## 🚀 Características Principales
 
 - **Múltiples fuentes**: permite abrir archivos, leer desde `stdin` y ejecutar comandos para analizar su salida.
+- **Seguimiento en vivo**: incorpora líneas agregadas a los archivos abiertos y muestra progresivamente la entrada de streams y comandos. Si el archivo se trunca o reemplaza, se recarga sin conservar su contenido anterior.
+- **Auto-scroll**: sigue el final mientras esté visible; al navegar hacia arriba se pausa y al regresar al final se reactiva.
 - **Búsqueda Full-Text con FTS5**: cada fuente crea una única tabla FTS5 sobre `raw` para búsquedas rápidas.
 - **Navegación por línea**: `rowid` representa el número de línea y permite mover el visor por puntero sin usar paginación por offset.
 - **Offset de archivo disponible**: cada línea conserva `file_position` como dato no indexado para usos posteriores.
@@ -26,6 +28,8 @@ Logalizer es una aplicación de escritorio para analizar logs con foco en abrir 
 - `Fields`: activa ayuda visual para campos estructurados, con `Compact`, `Only values` y filtro de campos.
 - `Format`: permite usar la detección automática, texto plano o fijar un formato cargado para la pestaña. Al cambiarlo, Logalizer reprocesa la metadata en segundo plano.
 - Menú contextual del visor: con texto seleccionado permite agregar o excluir la selección del filtro FTS5, agregar reglas de campos cuando `Fields` está activo, copiar la selección o copiar la línea completa.
+
+El seguimiento observa la ruta y comprueba su tamaño periódicamente. Una truncación seguida de una escritura que recupere el tamaño anterior entre dos comprobaciones puede pasar inadvertida; las reescrituras internas y la combinación de archivos rotados no están soportadas. Si una línea final sin salto continúa creciendo, su actualización espera al siguiente salto y provoca una recarga del archivo. Como la lectura de archivos usa `mmap`, un truncado externo simultáneo a una lectura puede provocar un fallo del proceso antes de que se detecte el cambio.
 
 ## Configuración Persistente
 
@@ -89,6 +93,8 @@ cd Logalizer
 
 cmake -B build-release -DCMAKE_BUILD_TYPE=Release -G Ninja
 cmake --build build-release --parallel
+
+ctest --test-dir build-release --output-on-failure
 
 ./build-release/Logalizer
 ```

@@ -61,15 +61,63 @@ bool MmapLineStore::open(QString* errorMessage) {
         }
         m_offsets.append(lineStart);
         m_lengths.append(static_cast<qint32>(lineEnd - lineStart));
+        m_partialLine = true;
+    }
+    return true;
+}
+
+bool MmapLineStore::hasPartialLine() const {
+    QReadLocker locker(&m_lock);
+    return m_partialLine;
+}
+
+qint64 MmapLineStore::mappedSize() const {
+    QReadLocker locker(&m_lock);
+    return m_mappedSize;
+}
+
+bool MmapLineStore::appendToSize(qint64 newSize, QString* errorMessage) {
+    QWriteLocker locker(&m_lock);
+    if (newSize < m_mappedSize || m_partialLine) {
+        return false;
+    }
+    if (newSize == m_mappedSize) {
+        return true;
+    }
+    uchar* mapping = m_file->map(0, newSize);
+    if (!mapping) {
+        if (errorMessage) *errorMessage = m_file->errorString();
+        return false;
+    }
+    if (m_mappedData) m_file->unmap(m_mappedData);
+    m_mappedData = mapping;
+    qint64 lineStart = m_mappedSize;
+    m_mappedSize = newSize;
+    for (qint64 i = lineStart; i < newSize; ++i) {
+        if (mapping[i] != '\n') continue;
+        qint64 end = i;
+        if (end > lineStart && mapping[end - 1] == '\r') --end;
+        m_offsets.append(lineStart);
+        m_lengths.append(static_cast<qint32>(end - lineStart));
+        lineStart = i + 1;
+    }
+    if (lineStart < newSize) {
+        qint64 end = newSize;
+        if (end > lineStart && mapping[end - 1] == '\r') --end;
+        m_offsets.append(lineStart);
+        m_lengths.append(static_cast<qint32>(end - lineStart));
+        m_partialLine = true;
     }
     return true;
 }
 
 int MmapLineStore::lineCount() const {
+    QReadLocker locker(&m_lock);
     return m_offsets.size();
 }
 
 qint64 MmapLineStore::filePosition(int lineNumber) const {
+    QReadLocker locker(&m_lock);
     if (lineNumber < 0 || lineNumber >= m_offsets.size()) {
         return 0;
     }
@@ -77,6 +125,7 @@ qint64 MmapLineStore::filePosition(int lineNumber) const {
 }
 
 QByteArray MmapLineStore::lineBytes(int lineNumber) const {
+    QReadLocker locker(&m_lock);
     if (!m_mappedData || lineNumber < 0 || lineNumber >= m_offsets.size()) {
         return QByteArray();
     }
