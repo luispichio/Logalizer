@@ -188,10 +188,19 @@ void addBuiltInFormats(QVector<LogFormatDefinition>& formats) {
     "body-field": "path",
     "level-field": "status"
   },
+  "java_timestamped": {
+    "title": "Java Timestamped Log",
+    "regex": {
+      "line": { "pattern": "^(?<timestamp>\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?)\\s+\\[(?<thread>[^\\]]+)\\]\\s+(?<level>TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)\\b\\s*(?<body>.*)$" }
+    },
+    "timestamp-field": "timestamp",
+    "level-field": "level",
+    "body-field": "body"
+  },
   "logfmt": {
     "title": "Logfmt",
     "regex": {
-      "line": { "pattern": "^(?=.*\\w+=).*$" }
+      "line": { "pattern": "^\\s*[A-Za-z0-9_:@.-]+\\s*=.*$" }
     },
     "timestamp-field": "time",
     "level-field": "level",

@@ -410,10 +410,57 @@ QString extractIsoTimestamp(QStringView line, int offset) {
 
     int end = offset + 10;
     const int limit = qMin(line.size(), offset + TimestampScanLimit);
+    // A space is part of the timestamp only when followed by a complete time.
+    if (end + 9 <= limit && (line[end] == QLatin1Char(' ') || line[end] == QLatin1Char('T'))
+        && isDigit(line[end + 1]) && isDigit(line[end + 2])
+        && line[end + 3] == QLatin1Char(':') && isDigit(line[end + 4])
+        && isDigit(line[end + 5]) && line[end + 6] == QLatin1Char(':')
+        && isDigit(line[end + 7]) && isDigit(line[end + 8])) {
+        end += 9;
+        if (end + 1 < limit && (line[end] == QLatin1Char('.') || line[end] == QLatin1Char(','))
+            && isDigit(line[end + 1])) {
+            ++end;
+            while (end < limit && isDigit(line[end])) ++end;
+        }
+        if (end < limit && (line[end] == QLatin1Char('Z') || line[end] == QLatin1Char('z'))) {
+            ++end;
+        } else if (end + 2 < limit && (line[end] == QLatin1Char('+') || line[end] == QLatin1Char('-'))
+                   && isDigit(line[end + 1]) && isDigit(line[end + 2])) {
+            end += 3;
+            if (end < limit && line[end] == QLatin1Char(':')) ++end;
+            if (end + 1 < limit && isDigit(line[end]) && isDigit(line[end + 1])) end += 2;
+        }
+        return line.mid(offset, end - offset).toString();
+    }
     while (end < limit && isTimestampChar(line[end])) {
         ++end;
     }
     return line.mid(offset, end - offset).toString();
+}
+
+// Fast path for common local ISO-style timestamps. Other precisions and
+// explicit timezone offsets retain Qt's general ISO parser below.
+qint64 epochFromLocalIsoTimestamp(const QString& text) {
+    if ((text.size() != 19 && text.size() != 23)
+        || text[4] != QLatin1Char('-') || text[7] != QLatin1Char('-')
+        || (text[10] != QLatin1Char(' ') && text[10] != QLatin1Char('T'))
+        || text[13] != QLatin1Char(':') || text[16] != QLatin1Char(':')
+        || (text.size() == 23 && text[19] != QLatin1Char('.') && text[19] != QLatin1Char(','))) {
+        return -1;
+    }
+    const int positions[] = {0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18};
+    for (int position : positions) {
+        if (!isDigit(text[position])) return -1;
+    }
+    if (text.size() == 23 && (!isDigit(text[20]) || !isDigit(text[21]) || !isDigit(text[22]))) return -1;
+    const auto pair = [&text](int position) {
+        return (text[position].unicode() - '0') * 10 + text[position + 1].unicode() - '0';
+    };
+    const QDate date(pair(0) * 100 + pair(2), pair(5), pair(8));
+    const int milliseconds = text.size() == 23 ? pair(20) * 10 + text[22].unicode() - '0' : 0;
+    const QTime time(pair(11), pair(14), pair(17), milliseconds);
+    const QTimeZone zone = QTimeZone::systemTimeZone();
+    return zone.isValid() ? epochFromDateTime(QDateTime(date, time, zone)) : -1;
 }
 
 bool matchesSyslogMonth(QStringView line, int offset) {
@@ -496,6 +543,11 @@ qint64 epochFromText(const QString& timestampText, const MetadataDetectionConfig
         if (formatted >= 0) {
             return formatted;
         }
+    }
+
+    const qint64 localIso = epochFromLocalIsoTimestamp(timestampText);
+    if (localIso >= 0) {
+        return localIso;
     }
 
     bool ok = false;
