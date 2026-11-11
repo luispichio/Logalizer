@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpressionMatch>
+#include <QTimeZone>
 #include <QtGlobal>
 
 namespace {
@@ -153,6 +154,16 @@ LogLevel levelFromFormat(const QString& value, const LogFormatDefinition& format
         return direct;
     }
 
+    if (!format.compiledLevelPatterns.isEmpty()) {
+        for (const LogFormatLevelPattern& pattern : format.compiledLevelPatterns) {
+            if ((pattern.regex.isValid() && pattern.regex.match(value).hasMatch())
+                || value.compare(pattern.pattern, Qt::CaseInsensitive) == 0) {
+                return levelFromText(pattern.level);
+            }
+        }
+        return LogLevel::Unknown;
+    }
+
     for (auto it = format.levelPatterns.constBegin(); it != format.levelPatterns.constEnd(); ++it) {
         const QString pattern = it.value();
         if (pattern.isEmpty()) {
@@ -242,12 +253,43 @@ QString trimFractionForFormat(const QString& timestampText, const QString& forma
         return timestampText;
     }
 
-    QRegularExpression fraction("([\\.,:])(\\d{3})\\d+");
+    static const QRegularExpression fraction = []() {
+        QRegularExpression regex("([\\.,:])(\\d{3})\\d+");
+        regex.optimize();
+        return regex;
+    }();
     return QString(timestampText).replace(fraction, "\\1\\2");
 }
 
 qint64 epochFromDateTime(const QDateTime& dateTime) {
     return dateTime.isValid() ? dateTime.toMSecsSinceEpoch() : -1;
+}
+
+// The common logcat timestamp has no year or timezone. Avoid Qt's general
+// format parser, but retain its local-time and reference-year semantics.
+qint64 epochFromLogcatTimestamp(const QString& text, const QDate& referenceDate) {
+    if (text.size() != 18 || text[2] != QLatin1Char('-') || text[5] != QLatin1Char(' ')
+        || text[8] != QLatin1Char(':') || text[11] != QLatin1Char(':')
+        || text[14] != QLatin1Char('.')) {
+        return -1;
+    }
+    const int digitPositions[] = {0, 1, 3, 4, 6, 7, 9, 10, 12, 13, 15, 16, 17};
+    for (int position : digitPositions) {
+        if (!isDigit(text[position])) {
+            return -1;
+        }
+    }
+    const auto pair = [&text](int position) {
+        return (text[position].unicode() - '0') * 10 + text[position + 1].unicode() - '0';
+    };
+    const int milliseconds = pair(15) * 10 + text[17].unicode() - '0';
+    const QDate date(referenceDate.year(), pair(0), pair(3));
+    const QTime time(pair(6), pair(9), pair(12), milliseconds);
+    const QTimeZone zone = QTimeZone::systemTimeZone();
+    if (!zone.isValid()) {
+        return -1;
+    }
+    return epochFromDateTime(QDateTime(date, time, zone));
 }
 
 qint64 epochFromFormat(const QString& timestampText, const LogFormatDefinition& format, const QDate& referenceDate) {
@@ -263,6 +305,12 @@ qint64 epochFromFormat(const QString& timestampText, const LogFormatDefinition& 
 
     const QDate refDate = referenceDate.isValid() ? referenceDate : QDate::currentDate();
     for (const QString& lnavFormat : format.timestampFormats) {
+        if (lnavFormat == QLatin1String("%m-%d %H:%M:%S.%L")) {
+            const qint64 epoch = epochFromLogcatTimestamp(timestampText, refDate);
+            if (epoch >= 0) {
+                return epoch;
+            }
+        }
         const QString text = trimFractionForFormat(QString(timestampText).replace(',', '.'), lnavFormat);
         const QString qtFormat = qtTimestampFormat(lnavFormat);
 

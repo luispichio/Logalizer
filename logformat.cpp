@@ -86,6 +86,19 @@ void addFormatFromObject(const QString& id, const QJsonObject& object, const QSt
         }
     }
 
+    // Preserve the hash iteration order used by level resolution when patterns overlap.
+    for (auto it = format.levelPatterns.constBegin(); it != format.levelPatterns.constEnd(); ++it) {
+        if (it.value().isEmpty()) {
+            continue;
+        }
+        LogFormatLevelPattern compiled;
+        compiled.level = it.key();
+        compiled.pattern = it.value();
+        compiled.regex = QRegularExpression(it.value(), QRegularExpression::CaseInsensitiveOption);
+        compiled.regex.optimize();
+        format.compiledLevelPatterns.append(std::move(compiled));
+    }
+
     const QJsonObject valueObject = object.value("value").toObject();
     for (auto it = valueObject.constBegin(); it != valueObject.constEnd(); ++it) {
         format.valueNames.append(it.key());

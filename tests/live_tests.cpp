@@ -1,6 +1,7 @@
 #include "logwidget.h"
 #include "logdatabase.h"
 #include "logformat.h"
+#include "loglineparser.h"
 #include "metadatapipeline.h"
 
 #include <QApplication>
@@ -20,6 +21,9 @@ private slots:
     void fileTailAndNavigation();
     void stdinProgress();
     void processProgress();
+    void metadataTimestampParsing();
+    void metadataCompiledLevels();
+    void metadataRegistryCompilesLevels();
 };
 
 static QString applicationPath;
@@ -137,6 +141,93 @@ void LiveTests::processProgress() {
     QTRY_COMPARE_WITH_TIMEOUT(LogDatabase::instance().rowCount(92), 1, 1500);
     QTRY_VERIFY_WITH_TIMEOUT(browser->toPlainText().contains("live output"), 1500);
 #endif
+}
+
+void LiveTests::metadataTimestampParsing() {
+    MetadataDetectionConfig config;
+    config.hasFormat = true;
+    config.referenceDate = QDate(2024, 8, 14);
+    config.format.timestampField = "timestamp";
+    config.format.timestampFormats = {"%m-%d %H:%M:%S.%L", "%m-%d %H:%M:%S.%f"};
+    LogFormatPattern pattern;
+    pattern.regex = QRegularExpression("^(?<timestamp>.*)$");
+    config.format.patterns.append(pattern);
+
+    const QStringList timestamps = {
+        "01-01 00:00:00.000", "02-29 23:59:59.999", "03-10 02:30:00.123",
+        "11-03 01:30:00.321", "12-31 23:59:59.999", "02-30 12:00:00.000",
+        "08-14 15:12:11.123456", "08-14 15:12:11,123", "invalid"
+    };
+    for (const QString& timestamp : timestamps) {
+        QString normalized = timestamp;
+        normalized.replace(',', '.');
+        QDateTime expected = QDateTime::fromString("2024 " + normalized, "yyyy MM-dd HH:mm:ss.zzz");
+        if (!expected.isValid()) {
+            normalized.replace(QRegularExpression("([\\.,:])(\\d{3})\\d+"), "\\1\\2");
+            expected = QDateTime::fromString("2024 " + normalized, "yyyy MM-dd HH:mm:ss.zzz");
+        }
+        const ParsedLineMetadata parsed = parseLineMetadata(QStringView(timestamp), config);
+        QCOMPARE(parsed.timestampText, timestamp);
+        QCOMPARE(parsed.timestampEpochMs, expected.isValid() ? expected.toMSecsSinceEpoch() : -1);
+    }
+}
+
+void LiveTests::metadataCompiledLevels() {
+    MetadataDetectionConfig config;
+    config.hasFormat = true;
+    config.format.levelField = "level";
+    LogFormatPattern linePattern;
+    linePattern.regex = QRegularExpression("^(?<level>.*)$");
+    config.format.patterns.append(linePattern);
+    config.format.levelPatterns.insert("debug", "^D");
+    config.format.levelPatterns.insert("error", "^E");
+    config.format.levelPatterns.insert("warning", "["); // Invalid regex, but a literal match remains valid.
+
+    const QStringList levels = {"D", "d", "E", "[", "unknown", "info"};
+    QVector<LogLevel> expected;
+    for (const QString& level : levels) {
+        expected.append(parseLineMetadata(QStringView(level), config).level);
+    }
+    for (auto it = config.format.levelPatterns.constBegin(); it != config.format.levelPatterns.constEnd(); ++it) {
+        LogFormatLevelPattern compiled;
+        compiled.level = it.key();
+        compiled.pattern = it.value();
+        compiled.regex = QRegularExpression(it.value(), QRegularExpression::CaseInsensitiveOption);
+        compiled.regex.optimize();
+        config.format.compiledLevelPatterns.append(compiled);
+    }
+    for (int i = 0; i < levels.size(); ++i) {
+        QCOMPARE(parseLineMetadata(QStringView(levels[i]), config).level, expected[i]);
+    }
+    QCOMPARE(expected[0], LogLevel::Debug);
+    QCOMPARE(expected[2], LogLevel::Error);
+    QCOMPARE(expected[3], LogLevel::Warn);
+}
+
+void LiveTests::metadataRegistryCompilesLevels() {
+    QSettings settings("Logalizer", "Logalizer");
+    const QString key = "formatDetection/customDefinitionsJson";
+    const QVariant previous = settings.value(key);
+    settings.setValue(key, R"JSON({"test_levels":{"json":true,"level-field":"level","level":{"debug":"^D","error":"^E"}}})JSON");
+    const QVector<LogFormatDefinition> formats = LogFormatRegistry::loadFormats();
+    if (previous.isValid()) {
+        settings.setValue(key, previous);
+    } else {
+        settings.remove(key);
+    }
+    for (const LogFormatDefinition& format : formats) {
+        if (format.id != QLatin1String("test_levels")) {
+            continue;
+        }
+        QCOMPARE(format.compiledLevelPatterns.size(), 2);
+        MetadataDetectionConfig config;
+        config.hasFormat = true;
+        config.format = format;
+        const QString line = "{\"level\":\"D\"}";
+        QCOMPARE(parseLineMetadata(QStringView(line), config).level, LogLevel::Debug);
+        return;
+    }
+    QFAIL("Custom format was not loaded");
 }
 
 int main(int argc, char** argv) {
