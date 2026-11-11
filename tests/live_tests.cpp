@@ -1,6 +1,8 @@
 #include "logwidget.h"
 #include "logdatabase.h"
 #include "logformat.h"
+#include "formatdetector.h"
+#include "loglineparser.h"
 #include "metadatapipeline.h"
 
 #include <QApplication>
@@ -20,6 +22,12 @@ private slots:
     void fileTailAndNavigation();
     void stdinProgress();
     void processProgress();
+    void metadataTimestampParsing();
+    void metadataCompiledLevels();
+    void metadataRegistryCompilesLevels();
+    void genericTimestampParsing();
+    void timestampSort();
+    void javaAndLogfmtDetection();
 };
 
 static QString applicationPath;
@@ -137,6 +145,173 @@ void LiveTests::processProgress() {
     QTRY_COMPARE_WITH_TIMEOUT(LogDatabase::instance().rowCount(92), 1, 1500);
     QTRY_VERIFY_WITH_TIMEOUT(browser->toPlainText().contains("live output"), 1500);
 #endif
+}
+
+void LiveTests::metadataTimestampParsing() {
+    MetadataDetectionConfig config;
+    config.hasFormat = true;
+    config.referenceDate = QDate(2024, 8, 14);
+    config.format.timestampField = "timestamp";
+    config.format.timestampFormats = {"%m-%d %H:%M:%S.%L", "%m-%d %H:%M:%S.%f"};
+    LogFormatPattern pattern;
+    pattern.regex = QRegularExpression("^(?<timestamp>.*)$");
+    config.format.patterns.append(pattern);
+
+    const QStringList timestamps = {
+        "01-01 00:00:00.000", "02-29 23:59:59.999", "03-10 02:30:00.123",
+        "11-03 01:30:00.321", "12-31 23:59:59.999", "02-30 12:00:00.000",
+        "08-14 15:12:11.123456", "08-14 15:12:11,123", "invalid"
+    };
+    for (const QString& timestamp : timestamps) {
+        QString normalized = timestamp;
+        normalized.replace(',', '.');
+        QDateTime expected = QDateTime::fromString("2024 " + normalized, "yyyy MM-dd HH:mm:ss.zzz");
+        if (!expected.isValid()) {
+            normalized.replace(QRegularExpression("([\\.,:])(\\d{3})\\d+"), "\\1\\2");
+            expected = QDateTime::fromString("2024 " + normalized, "yyyy MM-dd HH:mm:ss.zzz");
+        }
+        const ParsedLineMetadata parsed = parseLineMetadata(QStringView(timestamp), config);
+        QCOMPARE(parsed.timestampText, timestamp);
+        QCOMPARE(parsed.timestampEpochMs, expected.isValid() ? expected.toMSecsSinceEpoch() : -1);
+    }
+}
+
+void LiveTests::metadataCompiledLevels() {
+    MetadataDetectionConfig config;
+    config.hasFormat = true;
+    config.format.levelField = "level";
+    LogFormatPattern linePattern;
+    linePattern.regex = QRegularExpression("^(?<level>.*)$");
+    config.format.patterns.append(linePattern);
+    config.format.levelPatterns.insert("debug", "^D");
+    config.format.levelPatterns.insert("error", "^E");
+    config.format.levelPatterns.insert("warning", "["); // Invalid regex, but a literal match remains valid.
+
+    const QStringList levels = {"D", "d", "E", "[", "unknown", "info"};
+    QVector<LogLevel> expected;
+    for (const QString& level : levels) {
+        expected.append(parseLineMetadata(QStringView(level), config).level);
+    }
+    for (auto it = config.format.levelPatterns.constBegin(); it != config.format.levelPatterns.constEnd(); ++it) {
+        LogFormatLevelPattern compiled;
+        compiled.level = it.key();
+        compiled.pattern = it.value();
+        compiled.regex = QRegularExpression(it.value(), QRegularExpression::CaseInsensitiveOption);
+        compiled.regex.optimize();
+        config.format.compiledLevelPatterns.append(compiled);
+    }
+    for (int i = 0; i < levels.size(); ++i) {
+        QCOMPARE(parseLineMetadata(QStringView(levels[i]), config).level, expected[i]);
+    }
+    QCOMPARE(expected[0], LogLevel::Debug);
+    QCOMPARE(expected[2], LogLevel::Error);
+    QCOMPARE(expected[3], LogLevel::Warn);
+}
+
+void LiveTests::metadataRegistryCompilesLevels() {
+    QSettings settings("Logalizer", "Logalizer");
+    const QString key = "formatDetection/customDefinitionsJson";
+    const QVariant previous = settings.value(key);
+    settings.setValue(key, R"JSON({"test_levels":{"json":true,"level-field":"level","level":{"debug":"^D","error":"^E"}}})JSON");
+    const QVector<LogFormatDefinition> formats = LogFormatRegistry::loadFormats();
+    if (previous.isValid()) {
+        settings.setValue(key, previous);
+    } else {
+        settings.remove(key);
+    }
+    for (const LogFormatDefinition& format : formats) {
+        if (format.id != QLatin1String("test_levels")) {
+            continue;
+        }
+        QCOMPARE(format.compiledLevelPatterns.size(), 2);
+        MetadataDetectionConfig config;
+        config.hasFormat = true;
+        config.format = format;
+        const QString line = "{\"level\":\"D\"}";
+        QCOMPARE(parseLineMetadata(QStringView(line), config).level, LogLevel::Debug);
+        return;
+    }
+    QFAIL("Custom format was not loaded");
+}
+
+void LiveTests::genericTimestampParsing() {
+    const MetadataDetectionConfig config;
+    const QStringList timestamps = {
+        "2026-03-28 00:00:04,614", "2026-03-28 00:00:04.615",
+        "2026-03-28T00:00:04.616", "2026-03-28 00:00:04",
+        "2024-03-10 02:30:00.123", "2024-11-03 01:30:00.321",
+        "2026-03-28T00:00:04.123456Z", "2026-03-28 00:00:04.123+02:30",
+        "2026-03-28T00:00:04Z", "2026-02-30 00:00:04,000"
+    };
+    for (const QString& timestamp : timestamps) {
+        const QString line = timestamp + " [worker] INFO message key=value";
+        const ParsedLineMetadata parsed = parseLineMetadata(QStringView(line), config);
+        QCOMPARE(parsed.timestampText, timestamp);
+        QString normalized = timestamp;
+        normalized.replace(',', '.');
+        QDateTime expected = QDateTime::fromString(normalized, Qt::ISODateWithMs);
+        if (!expected.isValid()) expected = QDateTime::fromString(normalized, Qt::ISODate);
+        QCOMPARE(parsed.timestampEpochMs, expected.isValid() ? expected.toMSecsSinceEpoch() : -1);
+        QCOMPARE(parsed.level, LogLevel::Info);
+    }
+    const QString dateOnly = "2026-03-28 INFO message";
+    QCOMPARE(parseLineMetadata(QStringView(dateOnly), config).timestampText, QString("2026-03-28"));
+    const QString continuation = "    at example.Class.method(Class.java:42)";
+    QVERIFY(parseLineMetadata(QStringView(continuation), config).timestampText.isEmpty());
+}
+
+void LiveTests::timestampSort() {
+    auto& db = LogDatabase::instance();
+    constexpr int fileId = 93;
+    QVERIFY(db.createTable(fileId));
+    const QStringList lines = {"2026-03-28 00:00:04,615 INFO second",
+                               "2026-03-28 00:00:04,614 INFO first"};
+    QVector<LineRecord> records;
+    QVector<LineMetadataRecord> metadata;
+    MetadataDetectionConfig config;
+    for (int i = 0; i < lines.size(); ++i) {
+        records.append(LineRecord(lines[i], i, i));
+        const auto parsed = parseLineMetadata(QStringView(lines[i]), config);
+        metadata.append(LineMetadataRecord(i, parsed.timestampText, parsed.timestampEpochMs, parsed.level));
+    }
+    QVERIFY(db.insertBatch(fileId, records));
+    QVERIFY(db.insertMetadataBatch(fileId, metadata));
+    QVector<QVector<QString>> rows;
+    QStringList headers;
+    QVERIFY(db.queryRows(fileId, 0, 10, {}, true, true, rows, headers));
+    QCOMPARE(rows.size(), 2);
+    QCOMPARE(rows[0][0], QString("1"));
+    QCOMPARE(rows[1][0], QString("0"));
+    QVERIFY(db.dropTable(fileId));
+}
+
+void LiveTests::javaAndLogfmtDetection() {
+    const QStringList javaLines = {
+        "2026-03-28 00:00:04,614 [worker-1] INFO service: request id=42",
+        "2026-03-28 00:00:04,615 [worker-2] WARN service: request id=43",
+        "2026-03-28 00:00:04,616 [worker-3] ERROR service: request id=44"
+    };
+    const auto java = FormatDetector::detect("app.log", javaLines);
+    QVERIFY(java.detected);
+    QCOMPARE(java.format.id, QString("java_timestamped"));
+    MetadataDetectionConfig config;
+    config.hasFormat = true;
+    config.format = java.format;
+    config.formatPatternName = java.patternName;
+    const auto metadata = parseLineMetadata(QStringView(javaLines[0]), config);
+    QCOMPARE(metadata.timestampText, QString("2026-03-28 00:00:04,614"));
+    QCOMPARE(metadata.level, LogLevel::Info);
+    QVERIFY(metadata.timestampEpochMs >= 0);
+
+    const QStringList logfmtLines = {"time=2026-03-28T00:00:04Z level=info msg=hello",
+                                    "level=error msg=failed", "event=request status=200"};
+    const auto logfmt = FormatDetector::detect("app.log", logfmtLines);
+    QVERIFY(logfmt.detected);
+    QCOMPARE(logfmt.format.id, QString("logfmt"));
+
+    const QStringList plainLines = {"ordinary message id=1", "ordinary message id=2", "ordinary message id=3"};
+    const auto plain = FormatDetector::detect("app.log", plainLines);
+    QVERIFY(!plain.detected || plain.format.id != QLatin1String("logfmt"));
 }
 
 int main(int argc, char** argv) {

@@ -13,6 +13,12 @@ struct LogFormatPattern {
     QRegularExpression regex;
 };
 
+struct LogFormatLevelPattern {
+    QString level;
+    QString pattern;
+    QRegularExpression regex;
+};
+
 struct LogFormatDefinition {
     QString id;
     QString title;
@@ -27,6 +33,7 @@ struct LogFormatDefinition {
     QStringList timestampFormats;
     double timestampDivisor = 1.0;
     QHash<QString, QString> levelPatterns;
+    QVector<LogFormatLevelPattern> compiledLevelPatterns;
     QVector<LogFormatPattern> patterns;
     QStringList valueNames;
 

@@ -86,6 +86,19 @@ void addFormatFromObject(const QString& id, const QJsonObject& object, const QSt
         }
     }
 
+    // Preserve the hash iteration order used by level resolution when patterns overlap.
+    for (auto it = format.levelPatterns.constBegin(); it != format.levelPatterns.constEnd(); ++it) {
+        if (it.value().isEmpty()) {
+            continue;
+        }
+        LogFormatLevelPattern compiled;
+        compiled.level = it.key();
+        compiled.pattern = it.value();
+        compiled.regex = QRegularExpression(it.value(), QRegularExpression::CaseInsensitiveOption);
+        compiled.regex.optimize();
+        format.compiledLevelPatterns.append(std::move(compiled));
+    }
+
     const QJsonObject valueObject = object.value("value").toObject();
     for (auto it = valueObject.constBegin(); it != valueObject.constEnd(); ++it) {
         format.valueNames.append(it.key());
@@ -175,10 +188,19 @@ void addBuiltInFormats(QVector<LogFormatDefinition>& formats) {
     "body-field": "path",
     "level-field": "status"
   },
+  "java_timestamped": {
+    "title": "Java Timestamped Log",
+    "regex": {
+      "line": { "pattern": "^(?<timestamp>\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?)\\s+\\[(?<thread>[^\\]]+)\\]\\s+(?<level>TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)\\b\\s*(?<body>.*)$" }
+    },
+    "timestamp-field": "timestamp",
+    "level-field": "level",
+    "body-field": "body"
+  },
   "logfmt": {
     "title": "Logfmt",
     "regex": {
-      "line": { "pattern": "^(?=.*\\w+=).*$" }
+      "line": { "pattern": "^\\s*[A-Za-z0-9_:@.-]+\\s*=.*$" }
     },
     "timestamp-field": "time",
     "level-field": "level",
