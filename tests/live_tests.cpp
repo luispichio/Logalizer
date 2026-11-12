@@ -20,6 +20,10 @@ class LiveTests : public QObject {
     Q_OBJECT
 private slots:
     void fileTailAndNavigation();
+    void refreshPreservesSelection();
+    void growingViewPreservesSelection();
+    void repeatedNavigation();
+    void filteredBatchNavigation();
     void stdinProgress();
     void processProgress();
     void metadataTimestampParsing();
@@ -31,6 +35,94 @@ private slots:
 };
 
 static QString applicationPath;
+
+void LiveTests::refreshPreservesSelection() {
+    QTemporaryDir dir;
+    QFile file(dir.filePath("selection.log"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    for (int i = 0; i < 100; ++i) file.write(QString("selection line %1\n").arg(i).toUtf8());
+    file.close();
+    LogWidget widget(file.fileName(), 92);
+    widget.resize(800, 400);
+    widget.show();
+    auto* browser = widget.findChild<QTextBrowser*>();
+    QVERIFY(browser);
+    QTRY_VERIFY_WITH_TIMEOUT(browser->toPlainText().contains("selection line 0"), 10000);
+    QTRY_COMPARE_WITH_TIMEOUT(LogDatabase::instance().rowCount(92), 100, 10000);
+    QTest::qWait(200);
+    QTextCursor cursor = browser->textCursor();
+    cursor.setPosition(0);
+    cursor.setPosition(10, QTextCursor::KeepAnchor);
+    browser->setTextCursor(cursor);
+    const QString selected = browser->textCursor().selectedText();
+    QVERIFY(!selected.isEmpty());
+    QVERIFY(QMetaObject::invokeMethod(&widget, "onChunkInserted", Qt::DirectConnection,
+                                     Q_ARG(int, 92), Q_ARG(qint32, 100)));
+    QVERIFY(QMetaObject::invokeMethod(&widget, "onFinished", Qt::DirectConnection, Q_ARG(int, 92)));
+    QCOMPARE(browser->textCursor().selectedText(), selected);
+    QTest::qWait(1700);
+    QCOMPARE(browser->textCursor().selectedText(), selected);
+}
+
+void LiveTests::growingViewPreservesSelection() {
+    QTemporaryDir dir;
+    QFile file(dir.filePath("growing.log"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("first line\n");
+    file.close();
+    LogWidget widget(file.fileName(), 95);
+    widget.resize(800, 400);
+    widget.show();
+    auto* browser = widget.findChild<QTextBrowser*>();
+    QVERIFY(browser);
+    QTRY_VERIFY_WITH_TIMEOUT(browser->toPlainText().contains("first line"), 10000);
+    QTest::qWait(200);
+    QTextCursor cursor = browser->textCursor();
+    cursor.setPosition(0);
+    cursor.setPosition(5, QTextCursor::KeepAnchor);
+    browser->setTextCursor(cursor);
+    const QString selected = browser->textCursor().selectedText();
+    QVERIFY(!selected.isEmpty());
+    QVERIFY(file.open(QIODevice::Append));
+    file.write("second line\n");
+    file.close();
+    QTRY_VERIFY_WITH_TIMEOUT(browser->toPlainText().contains("second line"), 5000);
+    QCOMPARE(browser->textCursor().selectedText(), selected);
+}
+
+void LiveTests::repeatedNavigation() {
+    QTemporaryDir dir;
+    QFile file(dir.filePath("navigation.log"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    for (int i = 0; i < 300; ++i) file.write(QString("navigation line %1\n").arg(i).toUtf8());
+    file.close();
+    LogWidget widget(file.fileName(), 93);
+    widget.resize(800, 400);
+    widget.show();
+    auto* browser = widget.findChild<QTextBrowser*>();
+    QVERIFY(browser);
+    QTRY_VERIFY_WITH_TIMEOUT(browser->toPlainText().contains("navigation line 0"), 10000);
+    for (int i = 0; i < 20; ++i) QTest::keyClick(browser, Qt::Key_Down);
+    QTRY_VERIFY_WITH_TIMEOUT(browser->toPlainText().contains("navigation line 20"), 5000);
+    for (int i = 0; i < 20; ++i) QTest::keyClick(browser, Qt::Key_Down);
+    QTest::keyClick(browser, Qt::Key_Home);
+    QTest::qWait(100);
+    QVERIFY(browser->toPlainText().contains("navigation line 0"));
+}
+
+void LiveTests::filteredBatchNavigation() {
+    auto& db = LogDatabase::instance();
+    QVERIFY(db.createTable(94));
+    QVector<LineRecord> records;
+    for (int i = 0; i < 20; ++i)
+        records.append(LineRecord(i % 2 == 0 ? "match" : "other", i, i));
+    QVERIFY(db.insertBatch(94, records));
+    QCOMPARE(db.advanceFilteredLine(94, "match", 0, 3), 6);
+    QCOMPARE(db.advanceFilteredLine(94, "match", 6, -2), 2);
+    QCOMPARE(db.advanceFilteredLine(94, "match", 2, -50), 0);
+    QCOMPARE(db.advanceFilteredLine(94, "match", 18, 1), 18);
+    QVERIFY(db.dropTable(94));
+}
 
 void LiveTests::fileTailAndNavigation() {
     QTemporaryDir dir;

@@ -174,6 +174,8 @@ private:
     int m_wheelPixelRemainder = 0;
     QVector<QVector<QString>> m_buffer;
     QStringList m_bufferHeaders;
+    QString m_renderedHtml;
+    int m_renderedFirstLine = -1;
 
     qint64 m_fileSize = 0;
     qint32 m_totalLines = 0;

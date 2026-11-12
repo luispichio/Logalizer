@@ -568,6 +568,8 @@ void LogWidget::onReloading(int fileId) {
     m_totalLines = 0;
     m_bufferPointer = 0;
     m_buffer.clear();
+    m_renderedHtml.clear();
+    m_renderedFirstLine = -1;
     m_labelLines->setText("0");
     m_labelState->setText("File changed; reloading...");
     m_textBrowser->clear();
@@ -655,12 +657,8 @@ void LogWidget::followEnd() {
     if (!sortByTimestamp() && !m_ftsFilter.trimmed().isEmpty()) {
         int line = LogDatabase::instance().findFilteredLine(m_fileId, m_ftsFilter, qMax(0, rows - 1), true);
         if (line < 0) { setPointer(0, true); return; }
-        first = line;
-        for (int i = 1; i < visibleRowCount(); ++i) {
-            const int previous = LogDatabase::instance().findFilteredLine(m_fileId, m_ftsFilter, first - 1, true);
-            if (first <= 0 || previous < 0 || previous >= first) break;
-            first = previous;
-        }
+        first = LogDatabase::instance().advanceFilteredLine(m_fileId, m_ftsFilter,
+                                                             line, 1 - visibleRowCount());
     }
     setPointer(first, true);
 }
@@ -750,22 +748,27 @@ void LogWidget::setPointer(int p, bool force, bool backwards) {
 }
 
 void LogWidget::queuePointer(int p, bool backwards) {
+    if (backwards) m_followEnd = false;
     m_pendingPointer = p;
     m_pendingPointerBackwards = backwards;
     m_pendingFilteredSteps = 0;
-    m_navigationTimer->start();
+    if (!m_navigationTimer->isActive()) m_navigationTimer->start();
 }
 
 void LogWidget::queueFilteredMove(int steps) {
     if (steps == 0) {
         return;
     }
+    if (steps < 0) m_followEnd = false;
 
-    m_pendingFilteredSteps += steps;
-    m_navigationTimer->start();
+    // Bound accumulated work in case input arrives faster than the view can render.
+    m_pendingFilteredSteps = static_cast<int>(std::clamp(
+        static_cast<qint64>(m_pendingFilteredSteps) + steps, qint64(-10000), qint64(10000)));
+    if (!m_navigationTimer->isActive()) m_navigationTimer->start();
 }
 
 void LogWidget::applyPendingNavigation() {
+    m_navigationTimer->stop();
     const int pointer = m_pendingPointer;
     const bool backwards = m_pendingPointerBackwards;
     const int filteredSteps = m_pendingFilteredSteps;
@@ -811,20 +814,8 @@ void LogWidget::moveFiltered(int steps) {
     }
 
     const bool backwards = steps < 0;
-    int line = m_bufferPointer;
-    int remaining = qAbs(steps);
-    while (remaining-- > 0) {
-        const int candidate = LogDatabase::instance().findFilteredLine(
-            m_fileId,
-            m_ftsFilter,
-            line + (backwards ? -1 : 1),
-            backwards);
-        if (candidate < 0 || candidate == line) {
-            break;
-        }
-        line = candidate;
-    }
-
+    const int line = LogDatabase::instance().advanceFilteredLine(
+        m_fileId, m_ftsFilter, m_bufferPointer, steps);
     setPointer(line, false, backwards);
 }
 
@@ -876,10 +867,32 @@ void LogWidget::applyBufferToView() {
     }
     html += "</div></body></html>";
 
+    if (html == m_renderedHtml) return;
+    const int lineIndex = m_bufferHeaders.indexOf("line_number");
+    const int firstLine = lineIndex >= 0 && !m_buffer.isEmpty()
+        ? m_buffer.first().value(lineIndex).toInt() : -1;
+    const bool sameFirstLine = firstLine >= 0 && firstLine == m_renderedFirstLine;
+    const QTextCursor oldCursor = m_textBrowser->textCursor();
+    const int oldAnchor = oldCursor.anchor();
+    const int oldPosition = oldCursor.position();
+    const QString oldText = sameFirstLine && oldCursor.hasSelection()
+        ? m_textBrowser->toPlainText() : QString();
+    const int verticalScrollValue = m_textBrowser->verticalScrollBar()->value();
+    m_renderedHtml = html;
+    m_renderedFirstLine = firstLine;
     m_textBrowser->setHtml(html);
 
     if (m_textBrowser) {
         m_textBrowser->setExtraSelections({});
+        const int selectionEnd = qMax(oldAnchor, oldPosition);
+        if (!oldText.isEmpty() && selectionEnd <= oldText.size()
+            && m_textBrowser->toPlainText().left(selectionEnd) == oldText.left(selectionEnd)) {
+            QTextCursor restored = m_textBrowser->textCursor();
+            restored.setPosition(oldAnchor);
+            restored.setPosition(oldPosition, QTextCursor::KeepAnchor);
+            m_textBrowser->setTextCursor(restored);
+        }
+        if (sameFirstLine) m_textBrowser->verticalScrollBar()->setValue(verticalScrollValue);
         QTimer::singleShot(0, this, [this, horizontalScrollValue]() {
             if (!m_textBrowser || !m_textBrowser->horizontalScrollBar()) {
                 return;
@@ -1484,12 +1497,16 @@ bool LogWidget::eventFilter(QObject* obj, QEvent* event) {
         auto* ke = static_cast<QKeyEvent*>(event);
         int pageRows = visibleRowCount();
         switch (ke->key()) {
-        case Qt::Key_Down: moveFiltered(1); updateFollowFromView(); return true;
-        case Qt::Key_Up: moveFiltered(-1); updateFollowFromView(); return true;
-        case Qt::Key_PageDown: moveFiltered(pageRows); updateFollowFromView(); return true;
-        case Qt::Key_PageUp: moveFiltered(-pageRows); updateFollowFromView(); return true;
-        case Qt::Key_Home: setPointer(0, true, false); updateFollowFromView(); return true;
-        case Qt::Key_End: followEnd(); m_followEnd = true; return true;
+        case Qt::Key_Down: queueFilteredMove(1); return true;
+        case Qt::Key_Up: queueFilteredMove(-1); return true;
+        case Qt::Key_PageDown: queueFilteredMove(pageRows); return true;
+        case Qt::Key_PageUp: queueFilteredMove(-pageRows); return true;
+        case Qt::Key_Home:
+            m_navigationTimer->stop(); m_pendingPointer = -1; m_pendingFilteredSteps = 0;
+            setPointer(0, true, false); updateFollowFromView(); return true;
+        case Qt::Key_End:
+            m_navigationTimer->stop(); m_pendingPointer = -1; m_pendingFilteredSteps = 0;
+            followEnd(); m_followEnd = true; return true;
         default: break;
         }
     }
