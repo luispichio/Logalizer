@@ -36,9 +36,11 @@ public:
                       int fromLineNumber,
                       bool backwards);
     int findFilteredLine(int fileId,
-                         const QString& ftsFilter,
-                         int fromLineNumber,
-                         bool backwards);
+                          const QString& ftsFilter,
+                          int fromLineNumber,
+                          bool backwards);
+    int advanceFilteredLine(int fileId, const QString& ftsFilter,
+                            int fromLineNumber, int steps);
     int findTextLine(int fileId,
                      const QString& ftsFilter,
                      const QStringList& words,

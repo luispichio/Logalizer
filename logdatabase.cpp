@@ -502,6 +502,31 @@ int LogDatabase::findFilteredLine(int fileId,
     return q.value(0).toInt();
 }
 
+int LogDatabase::advanceFilteredLine(int fileId, const QString& ftsFilter,
+                                     int fromLineNumber, int steps) {
+    QMutexLocker locker(&m_mutex);
+    if (steps == 0 || ftsFilter.trimmed().isEmpty()) {
+        return fromLineNumber;
+    }
+    const QString table = tableName(fileId);
+    const bool backwards = steps < 0;
+    const QString sql = backwards
+        ? QString("SELECT rowid - 1 FROM %1 WHERE %1 MATCH ? AND rowid < ? ORDER BY rowid DESC LIMIT ?").arg(table)
+        : QString("SELECT rowid - 1 FROM %1 WHERE %1 MATCH ? AND rowid > ? ORDER BY rowid ASC LIMIT ?").arg(table);
+    QSqlQuery query(m_db);
+    query.prepare(sql);
+    query.addBindValue(ftsFilter.trimmed());
+    query.addBindValue(fromLineNumber + 1);
+    query.addBindValue(qAbs(steps));
+    if (!query.exec()) {
+        qWarning() << "LogDatabase::advanceFilteredLine: failed:" << query.lastError().text();
+        return fromLineNumber;
+    }
+    int line = fromLineNumber;
+    while (query.next()) line = query.value(0).toInt();
+    return line;
+}
+
 int LogDatabase::findTextLine(int fileId,
                               const QString& ftsFilter,
                               const QStringList& words,
