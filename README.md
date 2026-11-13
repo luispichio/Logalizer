@@ -210,12 +210,34 @@ empaquetado lo hace automáticamente.
 
 ### Publicar una nueva versión en GitHub
 
-Para compilar y publicar un release, con GitHub CLI autenticado (`gh auth login`),
-historial completo y árbol de trabajo limpio:
+Para publicar, integrá primero los cambios en `master` y asegurate de que estén
+subidos a `origin`. Un flujo habitual desde la raíz del repositorio es:
 
 ```bash
-scripts/release.sh patch   # o minor / major
+git switch master
+git pull --ff-only origin master
+git status
+git push origin master
+
+scripts/build-release.sh
+ctest --test-dir build-release --output-on-failure
+
+scripts/release.sh patch   # publica; también admite minor o major
 ```
+
+Antes de publicar se requiere:
+
+- GitHub CLI instalado y autenticado con `gh auth login`, acceso a `origin` y las
+  herramientas de compilación y empaquetado indicadas arriba.
+- Estar en la rama `master`, no en una rama de trabajo ni en un HEAD desacoplado.
+- Un árbol de trabajo limpio: sin cambios preparados o pendientes y sin archivos
+  nuevos no ignorados. `git status` permite comprobarlo; los archivos ignorados,
+  como los directorios de compilación, no impiden publicar.
+- Historial Git completo, al menos un tag de versión alcanzable y un commit HEAD
+  que todavía no tenga tag de versión.
+- Que `master` coincida con `origin/master`: sin commits locales pendientes de
+  subir ni commits remotos pendientes de integrar. El script consulta `origin`
+  antes de comprobarlo. Si hay divergencias, resolvelas antes de publicar.
 
 Por ejemplo, si el último tag alcanzable es `v0.2.62`, `patch` crea `v0.2.63`,
 `minor` crea `v0.3.0` y `major` crea `v1.0.0`. La versión estable del nuevo tag
@@ -224,8 +246,9 @@ aparece tanto en About como en los paquetes.
 El script obtiene los tags de `origin`, incrementa la versión más alta alcanzable
 desde HEAD, crea un tag anotado, compila en un directorio nuevo bajo
 `build-release/`, verifica los artefactos y publica el tag y el release en GitHub.
-No modifica releases existentes. HEAD debe ser un commit nuevo que todavía no tenga
-un tag de versión. `WITH_APPIMAGE=0` omite el AppImage.
+No modifica releases existentes. `WITH_APPIMAGE=0` omite el AppImage. La comprobación
+de `master` y `origin/master` se repite antes de subir los artefactos; si `master`
+avanza durante la compilación, la publicación se detiene.
 
 Si falla después de crear el tag, este se conserva. Corregí el problema y, con el
 mismo commit limpio y el tag todavía en HEAD, volvé a generar los paquetes en un
@@ -236,9 +259,11 @@ BUILD_DIR="$PWD/build-release/retry" DIST_DIR="$PWD/build-release/retry/dist" sc
 DIST_DIR="$PWD/build-release/retry/dist" scripts/create-github-release.sh v0.2.63
 ```
 
-El script de publicación comprueba el tag, el commit y `SHA256SUMS`; no acepta
-artefactos sin metadata o que no correspondan al checkout actual. Si el tag ya se
-subió pero falló la creación del release, el mismo comando permite reintentar.
+El script de publicación vuelve a exigir `master` limpio y sincronizado, y comprueba
+el tag, el commit y `SHA256SUMS`; no acepta artefactos sin metadata o que no
+correspondan al checkout actual. Si el tag ya se subió pero falló la creación del
+release, el mismo comando permite reintentar mientras `origin/master` siga en ese
+commit. Si avanzó, no se publican esos artefactos desde el commit anterior.
 
 ## 🤝 Contribuir
 

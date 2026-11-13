@@ -15,8 +15,8 @@ for command in git gh sha256sum; do
     command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
 done
 gh auth status >/dev/null 2>&1 || { echo "Run gh auth login first." >&2; exit 1; }
-[[ -z "$(git status --porcelain --untracked-files=normal)" ]] || { echo "Working tree must be clean." >&2; exit 1; }
-[[ "$(git rev-parse --is-shallow-repository)" == false ]] || { echo "A complete Git history is required." >&2; exit 1; }
+source "$SCRIPT_DIR/release-checks.sh"
+check_release_checkout
 COMMIT="$(git rev-parse HEAD)"
 [[ "$(git rev-parse --verify "refs/tags/$TAG^{commit}")" == "$COMMIT" ]] || { echo "Tag must point to HEAD." >&2; exit 1; }
 [[ -f "$DIST_DIR/RELEASE-METADATA" && -f "$DIST_DIR/SHA256SUMS" ]] || { echo "Missing release metadata or checksums." >&2; exit 1; }

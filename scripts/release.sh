@@ -11,9 +11,8 @@ for command in git gh cmake cpack sha256sum; do
     command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
 done
 gh auth status >/dev/null 2>&1 || { echo "Run gh auth login first." >&2; exit 1; }
-[[ -z "$(git status --porcelain --untracked-files=normal)" ]] || { echo "Working tree must be clean." >&2; exit 1; }
-[[ "$(git rev-parse --is-shallow-repository)" == false ]] || { echo "A complete Git history is required." >&2; exit 1; }
-git fetch origin --tags
+source "$SCRIPT_DIR/release-checks.sh"
+check_release_checkout
 if git tag --points-at HEAD --list 'v*' | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
     echo "HEAD already has a version tag; release a new commit instead." >&2
     exit 1
