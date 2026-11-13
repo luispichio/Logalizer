@@ -85,14 +85,13 @@ sudo apt install cmake ninja-build qt6-base-dev libqt6sql6-sqlite
 sudo dnf install cmake ninja-build qt6-qtbase-devel
 ```
 
-### Compilar desde fuentes
+### Compilar desde fuentes sin publicar
 
 ```bash
 git clone https://github.com/luispichio/Logalizer.git
 cd Logalizer
 
-cmake -B build-release -DCMAKE_BUILD_TYPE=Release -G Ninja
-cmake --build build-release --parallel
+scripts/build-release.sh
 
 ctest --test-dir build-release --output-on-failure
 
@@ -101,9 +100,26 @@ ctest --test-dir build-release --output-on-failure
 
 *(El proyecto se soporta y testea habitualmente con **Qt Creator** utilizando Ninja como generador).*
 
+`Release` significa que la aplicación se compila con optimizaciones. Este comando
+no crea tags ni publica nada en GitHub. Para configurar y compilar manualmente:
+
+```bash
+cmake -B build-release -DCMAKE_BUILD_TYPE=Release -G Ninja
+cmake --build build-release --parallel
+```
+
 ## 📦 Packaging
 
-El sistema de packaging está integrado en CMake vía **CPack**. La versión del paquete se genera automáticamente a partir de `MAJOR.MINOR.BUILD`, donde `BUILD` se incrementa con cada commit de Git.
+Hay tres formas de trabajar según lo que necesites:
+
+| Objetivo | Comando | Resultado | ¿Publica en GitHub? |
+|---|---|---|---|
+| Compilar y ejecutar localmente | `scripts/build-release.sh` | Ejecutable `build-release/Logalizer` | No |
+| Generar instaladores para probar o distribuir manualmente | `scripts/package-release.sh` | Paquetes en `dist/` | No |
+| Publicar una nueva versión | `scripts/release.sh patch` | Tag, paquetes y release de GitHub | **Sí** |
+
+Los scripts se ejecutan desde la raíz del repositorio. Solo el último crea un tag
+y publica en GitHub. Los paquetes se generan con **CPack**.
 
 ### Prerrequisitos adicionales
 
@@ -145,30 +161,84 @@ cd build-release
 cpack -G TGZ
 ```
 
-### Generar todos los artefactos de release
+### Generar instaladores sin publicar
 
 ```bash
 scripts/package-release.sh
 ```
 
-El script compila en modo `Release`, genera los paquetes disponibles con CPack, crea el AppImage usando el target `package-appimage`, copia todo a `dist/` y escribe `dist/SHA256SUMS`.
-
-### Crear un release en GitHub
-
-Requiere GitHub CLI autenticado con `gh auth login`.
-
-```bash
-scripts/package-release.sh
-scripts/create-github-release.sh v0.2.47
-```
-
-El ultimo numero de version corresponde al contador de commits usado por CPack. Para consultar el tag esperado antes de publicar:
+El script compila en modo `Release` y genera `.deb`, `.rpm`, `.tar.gz` y AppImage.
+Copia los resultados a `dist/` junto con `SHA256SUMS` y metadata de la compilación.
+**No crea tags ni publica nada.** Requiere las herramientas de empaquetado indicadas
+arriba; para omitir el AppImage:
 
 ```bash
-git rev-list --count HEAD
+WITH_APPIMAGE=0 scripts/package-release.sh
 ```
 
-Si el comando devuelve `47`, el tag recomendado es `v0.2.47`.
+El directorio de destino debe estar vacío. Para conservar paquetes anteriores,
+elegí otro directorio:
+
+```bash
+DIST_DIR="$PWD/dist/prueba-01" scripts/package-release.sh
+```
+
+El script elimina paquetes anteriores en la raíz de `build-release/` antes de
+generar los nuevos. La carpeta de destino seleccionada no se borra.
+
+### Versiones y releases
+
+Los tags Git `vMAJOR.MINOR.PATCH` son la fuente de la versión. Compilar o ejecutar
+`package-release.sh` **no incrementa la versión**: usa el estado actual de Git.
+En **About**, por ejemplo:
+
+| Estado del código | Versión mostrada en About |
+|---|---|
+| En el tag `v0.2.62`, sin cambios locales | `0.2.62 (build 62 · abc123…)` |
+| Dos commits después de ese tag | `0.2.62-dev.2+abc123… (build 64 · abc123…)` |
+| Con cambios locales sin commitear | Agrega `(dirty)` a la versión |
+
+El hash y el contador de commits son datos de diagnóstico, no el número de patch.
+Sin Git se usa `0.0.0-dev`; sin tags se agrega también el hash si está disponible.
+Los paquetes de desarrollo usan **solo la versión numérica del último tag**: por
+ejemplo, el nombre del paquete puede indicar `0.2.62` mientras About muestra
+`0.2.62-dev.2+…`. No deben publicarse como releases estables.
+
+La cabecera de versión se actualiza en cada compilación; para actualizar también
+la versión numérica de CPack es necesario volver a configurar CMake. El script de
+empaquetado lo hace automáticamente.
+
+### Publicar una nueva versión en GitHub
+
+Para compilar y publicar un release, con GitHub CLI autenticado (`gh auth login`),
+historial completo y árbol de trabajo limpio:
+
+```bash
+scripts/release.sh patch   # o minor / major
+```
+
+Por ejemplo, si el último tag alcanzable es `v0.2.62`, `patch` crea `v0.2.63`,
+`minor` crea `v0.3.0` y `major` crea `v1.0.0`. La versión estable del nuevo tag
+aparece tanto en About como en los paquetes.
+
+El script obtiene los tags de `origin`, incrementa la versión más alta alcanzable
+desde HEAD, crea un tag anotado, compila en un directorio nuevo bajo
+`build-release/`, verifica los artefactos y publica el tag y el release en GitHub.
+No modifica releases existentes. HEAD debe ser un commit nuevo que todavía no tenga
+un tag de versión. `WITH_APPIMAGE=0` omite el AppImage.
+
+Si falla después de crear el tag, este se conserva. Corregí el problema y, con el
+mismo commit limpio y el tag todavía en HEAD, volvé a generar los paquetes en un
+directorio vacío y publicalos:
+
+```bash
+BUILD_DIR="$PWD/build-release/retry" DIST_DIR="$PWD/build-release/retry/dist" scripts/package-release.sh
+DIST_DIR="$PWD/build-release/retry/dist" scripts/create-github-release.sh v0.2.63
+```
+
+El script de publicación comprueba el tag, el commit y `SHA256SUMS`; no acepta
+artefactos sin metadata o que no correspondan al checkout actual. Si el tag ya se
+subió pero falló la creación del release, el mismo comando permite reintentar.
 
 ## 🤝 Contribuir
 

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(Logalizer VERSION 0.2.0 LANGUAGES CXX)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Version.cmake)
+logalizer_resolve_version("${CMAKE_CURRENT_SOURCE_DIR}")
+project(Logalizer VERSION ${LOGALIZER_VERSION} LANGUAGES CXX)
 
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
@@ -9,37 +11,13 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ── Git-based build number ────────────────────────────────────────────────────
-# Build number  = total commit count (increments automatically on every commit).
-# Commit hash   = short SHA for exact reproducibility.
-execute_process(
-    COMMAND git rev-list --count HEAD
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    OUTPUT_VARIABLE GIT_BUILD_NUMBER
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-)
-execute_process(
-    COMMAND git rev-parse --short HEAD
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    OUTPUT_VARIABLE GIT_COMMIT_HASH
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-)
-if(NOT GIT_BUILD_NUMBER)
-    set(GIT_BUILD_NUMBER "0")
-endif()
-if(NOT GIT_COMMIT_HASH)
-    set(GIT_COMMIT_HASH "unknown")
-endif()
-
-# Generate version.h from version.h.in into the build directory
-configure_file(
-    ${CMAKE_SOURCE_DIR}/version.h.in
-    ${CMAKE_BINARY_DIR}/generated/version.h
-    @ONLY
-)
-
+# Refresh Git metadata on every build, including after commits and tag changes.
+add_custom_target(logalizer_version ALL
+    COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DOUTPUT_FILE=${CMAKE_BINARY_DIR}/generated/version.h
+        -P ${CMAKE_SOURCE_DIR}/cmake/GenerateVersion.cmake
+    BYPRODUCTS ${CMAKE_BINARY_DIR}/generated/version.h
+    VERBATIM)
 
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Sql)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Sql)
@@ -85,18 +63,24 @@ else()
 endif()
 
 target_link_libraries(Logalizer PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+add_dependencies(Logalizer logalizer_version)
 target_link_libraries(Logalizer PRIVATE Qt${QT_VERSION_MAJOR}::Sql)
 
 # Make #include "version.h" resolve to the generated file
 target_include_directories(Logalizer PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 include(CTest)
+if(BUILD_TESTING AND UNIX)
+    add_test(NAME version_metadata COMMAND bash ${CMAKE_SOURCE_DIR}/tests/version_tests.sh)
+    add_test(NAME release_validation COMMAND bash ${CMAKE_SOURCE_DIR}/tests/release_tests.sh)
+endif()
 if(BUILD_TESTING AND QT_VERSION_MAJOR EQUAL 6)
     find_package(Qt6 QUIET COMPONENTS Test)
     if(TARGET Qt6::Test)
     get_target_property(LOGALIZER_TEST_SOURCES Logalizer SOURCES)
     list(REMOVE_ITEM LOGALIZER_TEST_SOURCES main.cpp mainwindow.cpp mainwindow.h)
     qt_add_executable(logalizer_live_tests tests/live_tests.cpp ${LOGALIZER_TEST_SOURCES})
+    add_dependencies(logalizer_live_tests logalizer_version)
     target_include_directories(logalizer_live_tests PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
     target_link_libraries(logalizer_live_tests PRIVATE Qt6::Widgets Qt6::Sql Qt6::Test)
     add_test(NAME live_ingestion COMMAND logalizer_live_tests $<TARGET_FILE:Logalizer>)
@@ -138,9 +122,9 @@ install(FILES
 )
 
 # ── CPack packaging ───────────────────────────────────────────────────────────
-# Package version = major.minor.build  (build auto-increments with every commit)
+# Package versions use the numeric version from the nearest Git tag.
 set(CPACK_PACKAGE_NAME              "logalizer")
-set(CPACK_PACKAGE_VERSION           "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${GIT_BUILD_NUMBER}")
+set(CPACK_PACKAGE_VERSION           "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_VENDOR            "Luis Pichio")
 set(CPACK_PACKAGE_CONTACT           "luispichio@github")
 set(CPACK_PACKAGE_HOMEPAGE_URL      "https://github.com/luispichio/Logalizer")

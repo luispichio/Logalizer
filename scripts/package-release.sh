@@ -26,10 +26,23 @@ collect_artifacts() {
 require_command cmake
 require_command cpack
 
+cd "$SOURCE_DIR"
+SOURCE_COMMIT="$(git rev-parse HEAD)"
+SOURCE_TAG="$(git describe --tags --exact-match --match 'v[0-9]*' HEAD 2>/dev/null || true)"
+SOURCE_CLEAN=1
+[[ -z "$(git status --porcelain --untracked-files=normal)" ]] || SOURCE_CLEAN=0
 "$SCRIPT_DIR/build-release.sh"
+if [[ "$(git rev-parse HEAD)" != "$SOURCE_COMMIT" ]]; then
+    echo "HEAD changed during the build; refusing to package." >&2
+    exit 1
+fi
+[[ -z "$(git status --porcelain --untracked-files=normal)" ]] || SOURCE_CLEAN=0
 
-rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
+if find "$DIST_DIR" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+    echo "Artifact directory is not empty: $DIST_DIR. Choose an empty DIST_DIR." >&2
+    exit 1
+fi
 find "$BUILD_DIR" -maxdepth 1 -type f \( \
     -name "*.deb" -o \
     -name "*.rpm" -o \
@@ -58,9 +71,27 @@ if ! find "$DIST_DIR" -maxdepth 1 -type f | grep -q .; then
     exit 1
 fi
 
+if [[ "$(git rev-parse HEAD)" != "$SOURCE_COMMIT" ]]; then
+    echo "HEAD changed during packaging; refusing to write release metadata." >&2
+    exit 1
+fi
+[[ -z "$(git status --porcelain --untracked-files=normal)" ]] || SOURCE_CLEAN=0
+if [[ -n "$SOURCE_TAG" && "$SOURCE_CLEAN" == 1 ]]; then
+    VERSION="${SOURCE_TAG#v}"
+    if ! grep -Fq "\"$VERSION\"" "$BUILD_DIR/generated/version.h" ||
+       ! grep -Fq "set(CPACK_PACKAGE_VERSION \"$VERSION\")" "$BUILD_DIR/CPackConfig.cmake"; then
+        echo "Built application and package version do not match $SOURCE_TAG." >&2
+        exit 1
+    fi
+fi
+cat > "$DIST_DIR/RELEASE-METADATA" <<EOF
+commit=$SOURCE_COMMIT
+tag=$SOURCE_TAG
+clean=$SOURCE_CLEAN
+EOF
 (
     cd "$DIST_DIR"
-    sha256sum * > SHA256SUMS
+    sha256sum ./* > SHA256SUMS
 )
 
 echo "Release artifacts: $DIST_DIR"

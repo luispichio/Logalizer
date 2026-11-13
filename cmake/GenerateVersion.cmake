@@ -1,0 +1,7 @@
+include("${SOURCE_DIR}/cmake/Version.cmake")
+logalizer_resolve_version("${SOURCE_DIR}")
+string(REPLACE "." ";" version_parts "${LOGALIZER_VERSION}")
+list(GET version_parts 0 APP_VERSION_MAJOR)
+list(GET version_parts 1 APP_VERSION_MINOR)
+list(GET version_parts 2 APP_VERSION_PATCH)
+configure_file("${SOURCE_DIR}/version.h.in" "${OUTPUT_FILE}" @ONLY)
